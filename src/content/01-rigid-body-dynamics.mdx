@@ -1,0 +1,60 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+
+# Rigid Body Dynamics
+
+This chapter covers the fundamentals of rigid body dynamics as they apply to bipedal walking.
+
+## Newton-Euler Equations
+
+The motion of a rigid body is governed by Newton's second law for translation and Euler's equation for rotation.
+
+For translational motion:
+
+$$
+F = ma
+$$
+
+where $F$ is the net force, $m$ is the mass, and $a$ is the acceleration.
+
+For rotational motion about the center of mass:
+
+$$
+\tau = I\alpha
+$$
+
+where $\tau$ is the net torque, $I$ is the moment of inertia, and $\alpha$ is the angular acceleration.
+
+## Equations of Motion
+
+The general equation of motion for a rigid body system can be written as:
+
+$$
+M(q)\ddot{q} + C(q, \dot{q})\dot{q} + g(q) = \tau
+$$
+
+<MathBlock tex="M(q)\ddot{q} + C(q, \dot{q})\dot{q} + g(q) = \tau" />
+
+## Example: Simple Pendulum
+
+A simple pendulum demonstrates the basic principles:
+
+<CodeEditor
+  initialCode={`import math
+
+# Simple pendulum parameters
+g = 9.81  # gravity (m/s^2)
+L = 1.0   # length (m)
+theta0 = math.pi / 6  # initial angle (30 degrees)
+
+# Natural frequency
+omega_n = math.sqrt(g / L)
+period = 2 * math.pi / omega_n
+
+print(f"Natural frequency: {omega_n:.3f} rad/s")
+print(f"Period: {period:.3f} s")
+`}
+/>
+
+<InteractiveDemo title="Pendulum Simulation" />
