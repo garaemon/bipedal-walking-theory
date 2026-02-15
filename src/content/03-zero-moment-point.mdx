@@ -1,6 +1,7 @@
 import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { ZMPConceptDiagram, ZMPSupportPolygonDiagram } from "@/components/diagrams/ZMPDiagram";
 
 # Zero Moment Point (ZMP)
 
@@ -18,6 +19,8 @@ For a system of $n$ point masses, the ZMP position is:
 <MathBlock tex="p_x^{zmp} = \frac{\sum_{i=1}^{n} m_i (\ddot{z}_i + g) x_i - \sum_{i=1}^{n} m_i \ddot{x}_i z_i}{\sum_{i=1}^{n} m_i (\ddot{z}_i + g)}" />
 
 <MathBlock tex="p_y^{zmp} = \frac{\sum_{i=1}^{n} m_i (\ddot{z}_i + g) y_i - \sum_{i=1}^{n} m_i \ddot{y}_i z_i}{\sum_{i=1}^{n} m_i (\ddot{z}_i + g)}" />
+
+<ZMPConceptDiagram />
 
 ## Physical Meaning
 
@@ -47,6 +50,8 @@ and the ground.
 
 - **Single support**: the support polygon is the footprint of the stance foot
 - **Double support**: the support polygon includes both feet
+
+<ZMPSupportPolygonDiagram />
 
 ### ZMP Stability Criterion
 

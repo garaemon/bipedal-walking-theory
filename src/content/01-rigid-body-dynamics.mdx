@@ -1,6 +1,7 @@
 import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { RigidBodyDiagram, DoublePendulumDiagram } from "@/components/diagrams/RigidBodyDiagram";
 
 # Rigid Body Dynamics
 
@@ -30,6 +31,8 @@ $\boldsymbol{\alpha}$ is the angular acceleration, and $\boldsymbol{\omega}$ is 
 
 The term $\boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$ is the **gyroscopic effect** —
 it couples rotational motions in different axes and is significant for 3D walking dynamics.
+
+<RigidBodyDiagram />
 
 ## Inertia Tensor
 
@@ -180,6 +183,8 @@ For stable walking, the ground reaction force must remain inside the friction co
 ## Example: Double Pendulum
 
 The double pendulum is a minimal model for a two-link leg:
+
+<DoublePendulumDiagram />
 
 <CodeEditor
   initialCode={`import math

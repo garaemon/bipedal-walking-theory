@@ -1,6 +1,7 @@
 import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { LIPMDiagram, WalkingTransitionDiagram } from "@/components/diagrams/InvertedPendulumDiagram";
 
 # Inverted Pendulum Model
 
@@ -30,6 +31,8 @@ include $\sqrt{g/l} > 0$, meaning small perturbations grow exponentially without
 
 The Linear Inverted Pendulum Model constrains the center of mass (CoM) to move
 at a constant height $z_c$. This dramatically simplifies the dynamics.
+
+<LIPMDiagram />
 
 ### Derivation
 
@@ -148,6 +151,8 @@ for i in range(0, steps + 1, 10):
 />
 
 ## Walking with LIPM
+
+<WalkingTransitionDiagram />
 
 To generate a walking pattern, we chain multiple single-support phases together.
 At each step transition, the support point shifts to the new foot position.

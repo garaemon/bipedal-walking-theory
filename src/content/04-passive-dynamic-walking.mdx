@@ -1,6 +1,7 @@
 import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { PassiveWalkerDiagram, PoincareDiagram } from "@/components/diagrams/PassiveWalkerDiagram";
 
 # Passive Dynamic Walking
 
@@ -19,6 +20,8 @@ A minimal passive walker consists of:
 - Two rigid legs connected at a hip joint
 - Point feet (or curved feet for stability)
 - A shallow slope providing gravitational energy input
+
+<PassiveWalkerDiagram />
 
 ## Hybrid Dynamical System
 
@@ -77,6 +80,8 @@ state space that nearby trajectories converge to.
 The state of the walker at heel strike can be described by the stance leg angle
 $\theta$ and angular velocity $\dot{\theta}$. A stable walking gait appears as
 a closed orbit in the $(\theta, \dot{\theta})$ phase plane.
+
+<PoincareDiagram />
 
 ## Poincare Map Analysis
 
