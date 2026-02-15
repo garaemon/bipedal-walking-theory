@@ -6,6 +6,10 @@ const contentMap: Record<
   () => Promise<{ default: React.ComponentType }>
 > = {
   "01-rigid-body-dynamics": () => import("@/content/01-rigid-body-dynamics.mdx"),
+  "02-inverted-pendulum": () => import("@/content/02-inverted-pendulum.mdx"),
+  "03-zero-moment-point": () => import("@/content/03-zero-moment-point.mdx"),
+  "04-passive-dynamic-walking": () =>
+    import("@/content/04-passive-dynamic-walking.mdx"),
 };
 
 function ChapterPlaceholder({ title }: { title: string }) {

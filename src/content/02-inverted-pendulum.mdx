@@ -1,0 +1,222 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+
+# Inverted Pendulum Model
+
+The inverted pendulum is one of the most fundamental models in bipedal walking research.
+By approximating the walker as a point mass atop a massless leg, we can derive tractable
+equations of motion that capture the essential dynamics of walking.
+
+## Cart-Pole System
+
+Before discussing walking, consider the classic cart-pole (inverted pendulum on a cart).
+The equation of motion for a simple inverted pendulum of length $l$ and mass $m$ is:
+
+$$
+ml^2 \ddot{\theta} - mgl\sin\theta = \tau
+$$
+
+For small angles ($\sin\theta \approx \theta$), this linearizes to:
+
+$$
+\ddot{\theta} - \frac{g}{l}\theta = \frac{\tau}{ml^2}
+$$
+
+This is an **unstable** system: the eigenvalues of the linearized dynamics
+include $\sqrt{g/l} > 0$, meaning small perturbations grow exponentially without control.
+
+## Linear Inverted Pendulum Model (LIPM)
+
+The Linear Inverted Pendulum Model constrains the center of mass (CoM) to move
+at a constant height $z_c$. This dramatically simplifies the dynamics.
+
+### Derivation
+
+Consider a point mass $m$ at position $(x, z_c)$ with a massless leg contacting
+the ground at point $p_x$. The constraint force acts along the leg.
+
+From Newton's second law in the horizontal and vertical directions:
+
+$$
+m\ddot{x} = F_x, \quad m\ddot{z} = F_z - mg
+$$
+
+Since $z = z_c$ is constant, $\ddot{z} = 0$, so $F_z = mg$.
+
+The leg force direction gives us $F_x / F_z = (x - p_x) / z_c$, therefore:
+
+$$
+m\ddot{x} = \frac{mg}{z_c}(x - p_x)
+$$
+
+This yields the fundamental LIPM equation:
+
+<MathBlock tex="\ddot{x} = \frac{g}{z_c}(x - p_x)" />
+
+where $x$ is the CoM position, $p_x$ is the foot (support point) position,
+$g$ is gravitational acceleration, and $z_c$ is the constant CoM height.
+
+### Natural Frequency
+
+Define the natural frequency:
+
+$$
+\omega = \sqrt{\frac{g}{z_c}}
+$$
+
+The LIPM equation becomes $\ddot{x} = \omega^2(x - p_x)$.
+
+### Analytical Solution
+
+With support point at the origin ($p_x = 0$), the general solution is:
+
+$$
+x(t) = x_0 \cosh(\omega t) + \frac{\dot{x}_0}{\omega}\sinh(\omega t)
+$$
+
+$$
+\dot{x}(t) = x_0 \omega \sinh(\omega t) + \dot{x}_0 \cosh(\omega t)
+$$
+
+where $x_0 = x(0)$ and $\dot{x}_0 = \dot{x}(0)$ are the initial conditions.
+
+Note the use of hyperbolic functions ($\cosh$, $\sinh$) rather than trigonometric
+functions ($\cos$, $\sin$) — this reflects the unstable (divergent) nature of
+the inverted pendulum dynamics.
+
+## 3D Extension (3D-LIPM)
+
+The LIPM extends naturally to 3D. With the CoM constrained to height $z_c$:
+
+$$
+\ddot{x} = \frac{g}{z_c}(x - p_x), \quad \ddot{y} = \frac{g}{z_c}(y - p_y)
+$$
+
+The $x$ and $y$ dynamics are **decoupled**, which is a major advantage
+for walking pattern generation: we can plan sagittal and lateral motions independently.
+
+## Orbital Energy
+
+A useful concept for analyzing LIPM dynamics is the **orbital energy**:
+
+$$
+E = \frac{1}{2}\dot{x}^2 - \frac{1}{2}\omega^2(x - p_x)^2
+$$
+
+This quantity is conserved during single-support phases. Trajectories with:
+- $E > 0$: the CoM passes over the support point (walking)
+- $E = 0$: the CoM asymptotically approaches or leaves the support point
+- $E < 0$: the CoM oscillates around the support point (not physically meaningful for walking)
+
+## Python Simulation: LIPM Trajectory
+
+<CodeEditor
+  initialCode={`import math
+
+# LIPM parameters
+g = 9.81      # gravity (m/s^2)
+z_c = 0.8     # CoM height (m)
+omega = math.sqrt(g / z_c)  # natural frequency
+
+print(f"Natural frequency: omega = {omega:.3f} rad/s")
+print(f"Time constant: 1/omega = {1/omega:.3f} s")
+print()
+
+# Initial conditions
+x0 = -0.1    # initial CoM position (m)
+xd0 = 0.3    # initial CoM velocity (m/s)
+p_x = 0.0    # support point at origin
+
+# Simulate LIPM trajectory
+dt = 0.01
+t_end = 1.0
+steps = int(t_end / dt)
+
+print("Time(s)  x(m)     xdot(m/s)  Energy")
+print("-" * 45)
+
+for i in range(0, steps + 1, 10):
+    t = i * dt
+    # Analytical solution (support at origin)
+    x = x0 * math.cosh(omega * t) + (xd0 / omega) * math.sinh(omega * t)
+    xdot = x0 * omega * math.sinh(omega * t) + xd0 * math.cosh(omega * t)
+    # Orbital energy (should be conserved)
+    energy = 0.5 * xdot**2 - 0.5 * omega**2 * x**2
+    print(f"{t:5.2f}    {x:7.4f}  {xdot:7.4f}    {energy:7.4f}")
+`}
+/>
+
+## Walking with LIPM
+
+To generate a walking pattern, we chain multiple single-support phases together.
+At each step transition, the support point shifts to the new foot position.
+
+The key insight is that by choosing appropriate step lengths and timing,
+we can maintain a periodic walking gait. The **step-to-step transition** maps
+the state at the end of one step to the initial state of the next.
+
+<CodeEditor
+  initialCode={`import math
+
+# LIPM walking simulation
+g = 9.81
+z_c = 0.8
+omega = math.sqrt(g / z_c)
+T_step = 0.4  # step duration (s)
+
+# Step length pattern (alternating feet)
+step_length = 0.2  # meters
+
+# Start at the support foot
+x = -step_length / 2  # CoM starts behind support
+xdot = (step_length / 2) * omega / math.tanh(omega * T_step / 2)
+
+print(f"Step duration: {T_step:.2f} s")
+print(f"Step length: {step_length:.2f} m")
+print(f"Initial velocity: {xdot:.4f} m/s")
+print()
+
+support_x = 0.0
+print("Step  t(s)    CoM_x(m)  Velocity(m/s)  Support(m)")
+print("-" * 55)
+
+for step in range(5):
+    # Simulate one step
+    for i in range(int(T_step / 0.01) + 1):
+        t = i * 0.01
+        dx = x - support_x
+        x_t = support_x + dx * math.cosh(omega * t) + (xdot / omega) * math.sinh(omega * t)
+        xdot_t = dx * omega * math.sinh(omega * t) + xdot * math.cosh(omega * t)
+
+    # State at end of step
+    x = x_t
+    xdot = xdot_t
+    print(f"  {step}    {(step+1)*T_step:.2f}   {x:8.4f}     {xdot:8.4f}      {support_x:.3f}")
+
+    # Transition: shift support to new foot
+    support_x += step_length
+`}
+/>
+
+## Limitations of LIPM
+
+While powerful, the LIPM has important limitations:
+
+1. **Constant height assumption**: real walking involves vertical CoM motion
+2. **Point mass**: ignores angular momentum of limbs and torso
+3. **Massless legs**: leg swing dynamics are not captured
+4. **No double support**: transitions are instantaneous
+
+These limitations motivate more advanced models covered in later chapters.
+
+## References
+
+- S. Kajita et al., "The 3D Linear Inverted Pendulum Mode: A simple modeling for a biped walking pattern generation," *Proc. IEEE/RSJ IROS*, 2001.
+- S. Kajita et al., "Biped Walking Pattern Generation by using Preview Control of Zero-Moment Point," *Proc. IEEE ICRA*, 2003.
+
+<InteractiveDemo title="LIPM Simulation">
+  <p className="text-sm text-gray-500">
+    Interactive LIPM simulation with adjustable parameters coming soon.
+  </p>
+</InteractiveDemo>

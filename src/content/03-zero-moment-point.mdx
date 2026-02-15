@@ -1,0 +1,195 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+
+# Zero Moment Point (ZMP)
+
+The Zero Moment Point is a foundational concept in bipedal walking that provides
+a criterion for dynamic balance. Introduced by Vukobratovic and Juricic in 1969,
+ZMP theory has been the basis of most humanoid walking controllers for decades.
+
+## Definition
+
+The **Zero Moment Point** is the point on the ground where the net moment of all
+active forces (gravity and inertia) has zero horizontal components.
+
+For a system of $n$ point masses, the ZMP position is:
+
+<MathBlock tex="p_x^{zmp} = \frac{\sum_{i=1}^{n} m_i (\ddot{z}_i + g) x_i - \sum_{i=1}^{n} m_i \ddot{x}_i z_i}{\sum_{i=1}^{n} m_i (\ddot{z}_i + g)}" />
+
+<MathBlock tex="p_y^{zmp} = \frac{\sum_{i=1}^{n} m_i (\ddot{z}_i + g) y_i - \sum_{i=1}^{n} m_i \ddot{y}_i z_i}{\sum_{i=1}^{n} m_i (\ddot{z}_i + g)}" />
+
+## Physical Meaning
+
+The ZMP is equivalent to the **Center of Pressure (CoP)** — the point where the
+ground reaction force effectively acts — as long as the robot is in stable contact
+with the ground.
+
+Consider a single point mass at $(x, y, z)$. The ZMP simplifies to:
+
+$$
+p_x^{zmp} = x - \frac{z \ddot{x}}{\ddot{z} + g}
+$$
+
+For the LIPM case where $z = z_c$ (constant) and $\ddot{z} = 0$:
+
+$$
+p_x^{zmp} = x - \frac{z_c}{g}\ddot{x}
+$$
+
+This is exactly the support point $p_x$ from the LIPM equation
+$\ddot{x} = \frac{g}{z_c}(x - p_x)$.
+
+## Support Polygon
+
+The **support polygon** is the convex hull of all contact points between the robot
+and the ground.
+
+- **Single support**: the support polygon is the footprint of the stance foot
+- **Double support**: the support polygon includes both feet
+
+### ZMP Stability Criterion
+
+A robot maintains dynamic balance if and only if:
+
+> The ZMP lies within the support polygon.
+
+If the ZMP reaches the edge of the support polygon, the robot begins to tip over.
+This is the fundamental constraint used in walking pattern generation.
+
+## ZMP vs CoP vs CoG
+
+| Concept | Definition | Use case |
+|---------|-----------|----------|
+| **CoG** (Center of Gravity) | Weighted average position of all masses | Static balance |
+| **CoP** (Center of Pressure) | Point where ground reaction force acts | Measurable quantity |
+| **ZMP** (Zero Moment Point) | Point where horizontal moments vanish | Dynamic balance criterion |
+
+For a robot in stable ground contact, ZMP = CoP. When the computed ZMP exits the
+support polygon, the actual CoP remains at the polygon edge, and the robot tilts.
+
+## Computing ZMP from Motion Data
+
+Given a trajectory of the center of mass, we can compute the ZMP:
+
+<CodeEditor
+  initialCode={`import math
+
+# Simulate a simple CoM trajectory and compute ZMP
+# Using a sinusoidal CoM motion
+g = 9.81
+z_c = 0.8  # constant CoM height
+
+# Time parameters
+dt = 0.01
+t_values = [i * dt for i in range(101)]
+
+# CoM trajectory: x(t) = A * sin(omega_walk * t)
+A = 0.05        # amplitude (m)
+omega_walk = 2 * math.pi / 0.6  # walking frequency
+
+print("Time(s)  CoM_x(m)  CoM_xdd(m/s^2)  ZMP_x(m)")
+print("-" * 50)
+
+for i, t in enumerate(t_values):
+    if i % 10 != 0:
+        continue
+    # CoM position and acceleration
+    x = A * math.sin(omega_walk * t)
+    xdd = -A * omega_walk**2 * math.sin(omega_walk * t)
+
+    # ZMP computation (constant height, no vertical acceleration)
+    zmp_x = x - (z_c / g) * xdd
+
+    print(f"{t:5.2f}    {x:8.5f}    {xdd:8.4f}       {zmp_x:8.5f}")
+`}
+/>
+
+## ZMP for Multi-Body Systems
+
+For a robot with multiple rigid body links, the ZMP computation sums over all links:
+
+$$
+p_x^{zmp} = \frac{\sum_{i=1}^{N} m_i(g + \ddot{z}_{G_i})x_{G_i} - \sum_{i=1}^{N}(m_i \ddot{x}_{G_i} z_{G_i} + I_{iy}\ddot{\theta}_{iy})}{\sum_{i=1}^{N} m_i(g + \ddot{z}_{G_i})}
+$$
+
+where $(x_{G_i}, z_{G_i})$ is the center of mass of link $i$, $I_{iy}$ is the
+moment of inertia about the $y$-axis, and $\ddot{\theta}_{iy}$ is the angular
+acceleration.
+
+## ZMP-Based Walking Pattern Generation
+
+The typical pipeline for ZMP-based walking:
+
+1. **Define footstep sequence**: positions and timing of each step
+2. **Design ZMP reference**: a trajectory that stays within support polygons
+3. **Solve for CoM trajectory**: find CoM motion that produces the desired ZMP
+4. **Generate joint trajectories**: use inverse kinematics
+
+Step 3 is the core computational challenge, addressed by preview control
+(Chapter 5).
+
+<CodeEditor
+  initialCode={`import math
+
+# ZMP reference trajectory for 3-step walk
+# Simplified: ZMP shifts between left and right foot positions
+
+foot_y_left = 0.05    # left foot y-position (m)
+foot_y_right = -0.05  # right foot y-position (m)
+step_duration = 0.6   # seconds per step
+dt = 0.01
+
+# Footstep plan (y-positions of support foot)
+footsteps = [
+    (0.0, foot_y_left),         # step 1: left support
+    (step_duration, foot_y_right),  # step 2: right support
+    (2 * step_duration, foot_y_left),   # step 3: left support
+]
+
+print("=== ZMP Reference Trajectory (Lateral) ===")
+print("Time(s)  ZMP_ref_y(m)  Support")
+print("-" * 40)
+
+total_time = 3 * step_duration
+t = 0.0
+while t <= total_time:
+    # Determine current support phase
+    phase = int(t / step_duration)
+    if phase >= len(footsteps):
+        phase = len(footsteps) - 1
+
+    zmp_ref_y = footsteps[phase][1]
+    support = "Left" if zmp_ref_y > 0 else "Right"
+
+    if int(t * 100) % 10 == 0:
+        print(f"{t:5.2f}    {zmp_ref_y:8.4f}      {support}")
+    t += dt
+
+print()
+print("The ZMP reference alternates between feet.")
+print("Preview control (Ch.5) computes the CoM trajectory")
+print("that tracks this ZMP reference.")
+`}
+/>
+
+## Limitations of ZMP
+
+1. **Conservative**: ZMP criterion only considers ground contact forces; it does
+   not account for angular momentum, making it overly restrictive
+2. **Flat ground assumption**: extending ZMP to uneven terrain requires modifications
+3. **No push recovery**: ZMP-based walkers cannot recover from large perturbations
+   that push the ZMP outside the support polygon
+
+These limitations led to the development of **Capture Point** theory (Chapter 6).
+
+## References
+
+- M. Vukobratovic and J. Juricic, "Contribution to the synthesis of biped gait," *IEEE Trans. Bio-Medical Engineering*, 1969.
+- M. Vukobratovic and B. Borovac, "Zero-Moment Point — Thirty five years of its life," *Int. J. Humanoid Robotics*, 2004.
+
+<InteractiveDemo title="ZMP Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive ZMP trajectory and support polygon visualization coming soon.
+  </p>
+</InteractiveDemo>

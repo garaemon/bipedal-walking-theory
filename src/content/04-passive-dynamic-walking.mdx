@@ -1,0 +1,258 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+
+# Passive Dynamic Walking
+
+Passive dynamic walking demonstrates that bipedal locomotion does not necessarily
+require active control. Pioneered by Tad McGeer in 1990, passive walkers exploit
+gravity and mechanical dynamics to walk down shallow slopes with no motors or
+controllers.
+
+## McGeer's Passive Walker
+
+McGeer showed that a simple two-legged mechanism can walk stably down a slope
+using only gravity. The key insight: **walking is fundamentally a process of
+controlled falling**.
+
+A minimal passive walker consists of:
+- Two rigid legs connected at a hip joint
+- Point feet (or curved feet for stability)
+- A shallow slope providing gravitational energy input
+
+## Hybrid Dynamical System
+
+Passive walking is a **hybrid dynamical system** — it combines:
+
+1. **Continuous dynamics** (swing phase): governed by differential equations
+2. **Discrete events** (heel strike): instantaneous velocity changes
+
+### Swing Phase Dynamics
+
+For a planar compass-gait walker with leg length $l$, hip mass $M$,
+and foot mass $m$, the swing phase dynamics on a slope of angle $\gamma$ are:
+
+$$
+M_{\theta}(\theta)\ddot{\theta} + C_{\theta}(\theta, \dot{\theta})\dot{\theta} + G_{\theta}(\theta) = 0
+$$
+
+where $\theta = [\theta_{st}, \theta_{sw}]^T$ are the stance and swing leg angles.
+
+For the simplest walker (point masses at hip and feet):
+
+$$
+\ddot{\theta}_{st} = \sin(\theta_{st} - \gamma)
+$$
+
+$$
+\ddot{\theta}_{sw} = \ddot{\theta}_{st} + \dot{\theta}_{st}^2 \sin(\theta_{sw}) - \cos(\theta_{st} - \gamma)\sin(\theta_{sw})
+$$
+
+(Angles measured from the slope normal, normalized by $g/l$.)
+
+### Heel Strike (Impact Map)
+
+At heel strike, angular momentum is conserved about the impact point.
+This gives a discrete map from pre-impact to post-impact velocities:
+
+$$
+\dot{\theta}^+ = H(\theta^-)\dot{\theta}^-
+$$
+
+where $H$ is the impact transition matrix:
+
+$$
+H = \begin{bmatrix} \cos(2\alpha) & 0 \\ \cos(2\alpha)(1 - \cos(2\alpha)) & 0 \end{bmatrix}
+$$
+
+for a symmetric walker with inter-leg angle $2\alpha$ at impact.
+
+## Limit Cycles
+
+A stable passive gait corresponds to a **limit cycle** — a periodic orbit in
+state space that nearby trajectories converge to.
+
+### Phase Portrait
+
+The state of the walker at heel strike can be described by the stance leg angle
+$\theta$ and angular velocity $\dot{\theta}$. A stable walking gait appears as
+a closed orbit in the $(\theta, \dot{\theta})$ phase plane.
+
+## Poincare Map Analysis
+
+To analyze stability, we use a **Poincare map** $P$: a discrete-time map from
+one heel strike to the next.
+
+$$
+\mathbf{x}_{n+1} = P(\mathbf{x}_n)
+$$
+
+where $\mathbf{x}_n$ is the state at the $n$-th heel strike.
+
+### Fixed Point and Stability
+
+A periodic gait is a **fixed point** $\mathbf{x}^*$ of the Poincare map:
+
+$$
+\mathbf{x}^* = P(\mathbf{x}^*)
+$$
+
+The gait is locally stable if all eigenvalues of the Jacobian
+$\frac{\partial P}{\partial \mathbf{x}}\big|_{\mathbf{x}^*}$ have magnitude less than 1.
+
+## Python Simulation: Simplest Walker
+
+<CodeEditor
+  initialCode={`import math
+
+# Simplest passive walker simulation
+# (rimless wheel model as a starting point)
+
+# Parameters
+g = 9.81       # gravity (m/s^2)
+l = 1.0        # leg length (m)
+gamma = 0.05   # slope angle (radians, about 3 degrees)
+n_spokes = 5   # number of legs (rimless wheel)
+alpha = math.pi / n_spokes  # half inter-leg angle
+
+print("=== Rimless Wheel on Slope ===")
+print(f"Slope angle: {math.degrees(gamma):.1f} degrees")
+print(f"Number of spokes: {n_spokes}")
+print(f"Half inter-leg angle: {math.degrees(alpha):.1f} degrees")
+print()
+
+# Heel strike collision: angular velocity ratio
+# omega_plus / omega_minus = cos(2*alpha)
+collision_ratio = math.cos(2 * alpha)
+print(f"Collision velocity ratio: {collision_ratio:.4f}")
+
+# Energy balance for steady-state rolling
+# Energy gained from gravity per step = Energy lost at collision
+# Steady-state angular velocity before collision:
+omega_minus_sq = 2 * g / l * (1 - math.cos(2 * alpha * math.sin(gamma) / math.sin(2 * alpha)))
+
+# Simplified for small gamma:
+omega_steady = math.sqrt(2 * g * math.sin(gamma) * math.tan(alpha) / (l * (1 - collision_ratio**2)))
+
+print(f"Steady-state angular velocity: {omega_steady:.4f} rad/s")
+print()
+
+# Simulate multiple steps
+omega = omega_steady * 0.8  # start slightly slower
+print("Step  omega_before  omega_after   Steady?")
+print("-" * 48)
+
+for step in range(10):
+    # Swing phase: energy conservation on slope
+    # omega_end^2 = omega_start^2 + 2*(g/l)*(cos(theta_end) - cos(theta_start))
+    # For small angles, gain from slope:
+    energy_gain = 2 * (g / l) * math.sin(gamma) * math.sin(2 * alpha)
+    omega_before_strike = math.sqrt(omega**2 + energy_gain)
+
+    # Heel strike
+    omega_after_strike = collision_ratio * omega_before_strike
+
+    converged = "~" if abs(omega_after_strike - omega_steady * collision_ratio) < 0.01 else " "
+    print(f"  {step:2d}     {omega_before_strike:8.4f}      {omega_after_strike:8.4f}     {converged}")
+
+    omega = omega_after_strike
+`}
+/>
+
+## Energy Efficiency
+
+Passive walkers are remarkably energy-efficient compared to actively controlled
+robots. The **cost of transport** (CoT) measures energy efficiency:
+
+$$
+CoT = \frac{E_{input}}{m g d}
+$$
+
+where $E_{input}$ is energy consumed, $m$ is mass, $g$ is gravity, and $d$ is
+distance traveled.
+
+| Walker type | Cost of Transport |
+|-------------|------------------|
+| Passive walker | ~0.05 |
+| Human walking | ~0.20 |
+| Honda ASIMO | ~3.2 |
+| Boston Dynamics Atlas | ~2.0 |
+
+Passive walkers achieve near-human efficiency because they exploit natural
+dynamics rather than fighting them.
+
+## Bifurcation and Chaos
+
+As slope angle $\gamma$ increases:
+
+1. **Small $\gamma$**: stable period-1 gait (one step per cycle)
+2. **Moderate $\gamma$**: period-doubling bifurcation (period-2, period-4, ...)
+3. **Large $\gamma$**: chaotic walking, then falling
+
+This rich dynamical behavior connects bipedal walking to nonlinear dynamics
+and chaos theory.
+
+<CodeEditor
+  initialCode={`import math
+
+# Demonstrate period-doubling concept
+# Using a simple logistic-map analogy for the Poincare map
+
+print("=== Bifurcation Behavior ===")
+print()
+print("As slope increases, the gait transitions:")
+print("  Period-1 -> Period-2 -> Period-4 -> Chaos -> Falling")
+print()
+
+# Simplified model: map x_{n+1} = r * x_n * (1 - x_n)
+# r increases with slope angle
+slopes = [
+    (0.02, 2.8, "Period-1 (stable)"),
+    (0.04, 3.2, "Period-2"),
+    (0.06, 3.5, "Period-4"),
+    (0.08, 3.9, "Chaos"),
+]
+
+for gamma_deg, r, label in slopes:
+    x = 0.5
+    # Run for 50 iterations to settle
+    for _ in range(50):
+        x = r * x * (1 - x)
+    # Collect next 8 iterations
+    values = []
+    for _ in range(8):
+        x = r * x * (1 - x)
+        values.append(x)
+
+    unique = sorted(set(round(v, 4) for v in values))
+    print(f"Slope {gamma_deg:.2f} rad: {label}")
+    print(f"  Distinct states: {len(unique)}")
+    print(f"  Values: {[f'{v:.4f}' for v in unique[:4]]}")
+    print()
+`}
+/>
+
+## From Passive to Active Walking
+
+Passive dynamic walking provides insights for active walker design:
+
+1. **Exploit natural dynamics**: design controllers that work with, not against,
+   the robot's natural motion
+2. **Minimal actuation**: add small amounts of energy at the right time
+   (e.g., ankle push-off) rather than controlling every joint
+3. **Limit cycle stability**: design gaits as stable periodic orbits
+
+These principles influenced the development of efficient walking robots
+like Cornell's Ranger and Delft's Flame.
+
+## References
+
+- T. McGeer, "Passive Dynamic Walking," *Int. J. Robotics Research*, 1990.
+- A. Goswami et al., "Limit Cycles in a Passive Compass Gait Biped and Passivity-Mimicking Control Laws," *Autonomous Robots*, 1997.
+- S. Collins et al., "Efficient Bipedal Robots Based on Passive-Dynamic Walkers," *Science*, 2005.
+
+<InteractiveDemo title="Passive Walker Simulation">
+  <p className="text-sm text-gray-500">
+    Interactive passive walker on adjustable slope coming soon.
+  </p>
+</InteractiveDemo>
