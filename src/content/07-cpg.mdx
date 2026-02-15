@@ -1,0 +1,199 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { CPGNetworkDiagram } from "@/components/diagrams/CPGDiagram";
+
+# Central Pattern Generators (CPG)
+
+Central Pattern Generators are neural circuits found in vertebrate spinal cords
+that produce rhythmic motor patterns without requiring rhythmic sensory input.
+CPG-based controllers offer a biologically inspired approach to locomotion.
+
+## Biological Background
+
+In animals, CPGs in the spinal cord generate the basic rhythmic patterns for
+walking, swimming, and flying. Key properties:
+
+- **Autonomous rhythm**: produce oscillations without external timing
+- **Sensory modulation**: feedback adjusts frequency, amplitude, and phase
+- **Robustness**: continue functioning despite perturbations
+
+## Coupled Oscillator Model
+
+A CPG network consists of oscillators coupled with specific phase relationships.
+The phase model of a CPG network is:
+
+<MathBlock tex="\dot{\phi}_i = \omega_i + \sum_{j} w_{ij} \sin(\phi_j - \phi_i - \psi_{ij})" />
+
+where:
+- $\phi_i$ is the phase of oscillator $i$
+- $\omega_i$ is the intrinsic frequency
+- $w_{ij}$ is the coupling weight from oscillator $j$ to $i$
+- $\psi_{ij}$ is the desired phase difference
+
+<CPGNetworkDiagram />
+
+## Phase Coordination for Walking
+
+For bipedal walking, the key phase relationships are:
+
+| Joint pair | Phase offset | Meaning |
+|-----------|-------------|---------|
+| Left hip - Right hip | $\pi$ | Alternating legs |
+| Hip - Knee (same leg) | $\pi/2$ | Knee leads hip by quarter cycle |
+| Left knee - Right knee | $\pi$ | Anti-phase |
+
+## Amplitude-Controlled CPG
+
+A more complete CPG model includes amplitude control using the Hopf oscillator:
+
+$$
+\dot{x}_i = \alpha(\mu_i - r_i^2)x_i - \omega_i y_i
+$$
+
+$$
+\dot{y}_i = \alpha(\mu_i - r_i^2)y_i + \omega_i x_i
+$$
+
+where $r_i = \sqrt{x_i^2 + y_i^2}$, $\mu_i$ controls the amplitude, and
+$\alpha$ controls the convergence rate to the limit cycle.
+
+<CodeEditor
+  initialCode={`import math
+
+# CPG simulation using coupled phase oscillators
+# For bipedal walking with 4 oscillators
+
+# Parameters
+omega_base = 2 * math.pi * 1.5  # base frequency (1.5 Hz walking)
+coupling_strength = 5.0
+
+# Phase offsets (desired relationships)
+# 0: left hip, 1: right hip, 2: left knee, 3: right knee
+psi = [
+    [0, math.pi, math.pi/2, 0],       # from left hip's perspective
+    [math.pi, 0, 0, math.pi/2],       # from right hip's perspective
+    [-math.pi/2, 0, 0, math.pi],      # from left knee's perspective
+    [0, -math.pi/2, math.pi, 0],      # from right knee's perspective
+]
+
+# Coupling weights (symmetric network)
+w = [
+    [0, 3, 2, 0],
+    [3, 0, 0, 2],
+    [2, 0, 0, 1],
+    [0, 2, 1, 0],
+]
+
+# Initial phases (random start)
+phi = [0.0, 0.5, 1.0, 2.0]
+
+dt = 0.001
+sim_time = 3.0
+steps = int(sim_time / dt)
+
+print("=== CPG Simulation ===")
+print(f"Walking frequency: {omega_base/(2*math.pi):.1f} Hz")
+print()
+print("Time(s)  L_Hip    R_Hip    L_Knee   R_Knee   Phase_diff(L-R hip)")
+print("-" * 65)
+
+for k in range(steps):
+    t = k * dt
+
+    # Compute phase derivatives
+    dphi = [0.0] * 4
+    for i in range(4):
+        dphi[i] = omega_base
+        for j in range(4):
+            dphi[i] += w[i][j] * math.sin(phi[j] - phi[i] - psi[i][j])
+
+    # Update phases
+    for i in range(4):
+        phi[i] += dphi[i] * dt
+
+    # Print joint angles (sine of phase as proxy)
+    if k % 300 == 0:
+        angles = [math.sin(phi[i]) for i in range(4)]
+        phase_diff = (phi[1] - phi[0]) % (2 * math.pi)
+        if phase_diff > math.pi:
+            phase_diff -= 2 * math.pi
+        print(f"{t:5.2f}    {angles[0]:+6.3f}  {angles[1]:+6.3f}  "
+              f"{angles[2]:+6.3f}  {angles[3]:+6.3f}   "
+              f"{phase_diff:.3f} ({phase_diff/math.pi:.2f}pi)")
+
+print()
+print("Phase difference should converge to pi (anti-phase)")
+`}
+/>
+
+## Modulating CPG Parameters
+
+CPG parameters can be modulated to change gait properties:
+
+- **Frequency ($\omega$)**: walking speed
+- **Amplitude ($\mu$)**: step size
+- **Phase offsets ($\psi$)**: gait pattern (walk, trot, gallop)
+- **Coupling weights ($w$)**: inter-joint coordination strength
+
+<CodeEditor
+  initialCode={`import math
+
+# Demonstrate CPG frequency modulation
+# Speed changes by adjusting omega
+
+speeds = [
+    ("Slow walk", 1.0),
+    ("Normal walk", 1.5),
+    ("Fast walk", 2.0),
+    ("Slow run", 2.5),
+]
+
+print("=== CPG Frequency Modulation ===")
+print()
+
+dt = 0.001
+for name, freq in speeds:
+    omega = 2 * math.pi * freq
+    amplitude = 0.3 + 0.15 * freq  # larger steps at higher speed
+
+    # Simulate one cycle
+    period = 1.0 / freq
+    steps = int(period / dt)
+    max_vel = 0
+    positions = []
+
+    phi = 0.0
+    for k in range(steps):
+        phi += omega * dt
+        pos = amplitude * math.sin(phi)
+        vel = amplitude * omega * math.cos(phi)
+        max_vel = max(max_vel, abs(vel))
+        positions.append(pos)
+
+    print(f"{name} ({freq:.1f} Hz):")
+    print(f"  Period: {period:.3f} s")
+    print(f"  Amplitude: {amplitude:.2f} rad")
+    print(f"  Max angular velocity: {max_vel:.2f} rad/s")
+    print()
+`}
+/>
+
+## Advantages of CPG Control
+
+1. **Robustness**: inherently stable rhythmic patterns
+2. **Adaptability**: smooth transitions between gaits
+3. **Low-dimensional**: few parameters control complex motions
+4. **Sensory integration**: feedback naturally modulates the rhythm
+5. **Distributed**: no central computation bottleneck
+
+## References
+
+- A. Ijspeert, "Central pattern generators for locomotion control in animals and robots: A review," *Neural Networks*, 2008.
+- L. Righetti and A. Ijspeert, "Pattern generators with sensory feedback for the control of quadruped locomotion," *Proc. IEEE ICRA*, 2008.
+
+<InteractiveDemo title="CPG Oscillator Network">
+  <p className="text-sm text-gray-500">
+    Interactive CPG network with adjustable coupling coming soon.
+  </p>
+</InteractiveDemo>

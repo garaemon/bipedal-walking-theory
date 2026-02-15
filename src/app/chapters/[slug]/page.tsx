@@ -10,6 +10,12 @@ const contentMap: Record<
   "03-zero-moment-point": () => import("@/content/03-zero-moment-point.mdx"),
   "04-passive-dynamic-walking": () =>
     import("@/content/04-passive-dynamic-walking.mdx"),
+  "05-preview-control": () => import("@/content/05-preview-control.mdx"),
+  "06-capture-point-dcm": () => import("@/content/06-capture-point-dcm.mdx"),
+  "07-cpg": () => import("@/content/07-cpg.mdx"),
+  "08-whole-body-control": () => import("@/content/08-whole-body-control.mdx"),
+  "09-hybrid-zero-dynamics": () =>
+    import("@/content/09-hybrid-zero-dynamics.mdx"),
 };
 
 function ChapterPlaceholder({ title }: { title: string }) {

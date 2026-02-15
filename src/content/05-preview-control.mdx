@@ -1,0 +1,268 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { PreviewControlDiagram, CoMZMPSystemDiagram } from "@/components/diagrams/PreviewControlDiagram";
+
+# Preview Control for Walking
+
+Preview control is a powerful technique for generating walking patterns by
+using future reference information. It was introduced to bipedal walking by
+Kajita et al. in 2003 and remains one of the most widely used methods.
+
+## State-Space Model of CoM-ZMP Dynamics
+
+Starting from the LIPM equation $\ddot{x} = \frac{g}{z_c}(x - p_x)$,
+we can express the ZMP as:
+
+$$
+p_x = x - \frac{z_c}{g}\ddot{x}
+$$
+
+To apply optimal control, we use the **jerk** $u = \dddot{x}$ as the control
+input. The state vector is $\mathbf{x} = [x, \dot{x}, \ddot{x}]^T$, giving
+the discrete-time state-space model:
+
+$$
+\mathbf{x}_{k+1} = A\mathbf{x}_k + Bu_k
+$$
+
+$$
+p_k = C\mathbf{x}_k
+$$
+
+where (with sampling period $T$):
+
+$$
+A = \begin{bmatrix} 1 & T & T^2/2 \\ 0 & 1 & T \\ 0 & 0 & 1 \end{bmatrix}, \quad
+B = \begin{bmatrix} T^3/6 \\ T^2/2 \\ T \end{bmatrix}, \quad
+C = \begin{bmatrix} 1 & 0 & -z_c/g \end{bmatrix}
+$$
+
+<CoMZMPSystemDiagram />
+
+## Preview Control Theory
+
+The key idea is to use **future reference information** to improve tracking
+performance. The controller looks ahead $N_L$ steps into the future.
+
+<PreviewControlDiagram />
+
+### Cost Function
+
+The preview controller minimizes:
+
+$$
+J = \sum_{i=k}^{\infty} \left[ Q_e e(i)^2 + R \Delta u(i)^2 \right]
+$$
+
+where $e(i) = p(i) - p^{ref}(i)$ is the ZMP tracking error and
+$\Delta u(i) = u(i) - u(i-1)$ is the control increment.
+
+The incremental formulation ensures zero steady-state error.
+
+### Controller Structure
+
+The optimal preview controller has three components:
+
+<MathBlock tex="u(k) = -G_I \sum_{i=0}^{k} e(i) - G_x \mathbf{x}(k) - \sum_{j=1}^{N_L} G_p(j) \, p^{ref}(k+j)" />
+
+1. **Integral term** $-G_I \sum e$: eliminates steady-state error
+2. **State feedback** $-G_x \mathbf{x}$: stabilizes the system
+3. **Preview action** $-\sum G_p \cdot p^{ref}$: anticipates future reference
+
+The preview gains $G_p(j)$ decay with preview horizon $j$, meaning
+near-future references have more influence than distant ones.
+
+## Computing Preview Gains
+
+The gains are obtained by solving the **discrete-time algebraic Riccati equation** (DARE):
+
+$$
+P = A_e^T P A_e - A_e^T P B_e (R + B_e^T P B_e)^{-1} B_e^T P A_e + C_e^T Q_e C_e
+$$
+
+where $A_e$, $B_e$, $C_e$ are the augmented system matrices that include
+the integrator state.
+
+<CodeEditor
+  initialCode={`import math
+
+# Preview control gain computation (simplified)
+# Using the LIPM state-space model
+
+g = 9.81
+z_c = 0.8
+T = 0.01  # sampling period (s)
+N_preview = 160  # preview steps (1.6 seconds ahead)
+
+# State-space matrices
+A = [
+    [1, T, T**2/2],
+    [0, 1, T],
+    [0, 0, 1]
+]
+B = [T**3/6, T**2/2, T]
+C = [1, 0, -z_c/g]
+
+# Compute ZMP output: p = C * x
+def compute_zmp(x):
+    return C[0]*x[0] + C[1]*x[1] + C[2]*x[2]
+
+# Simple preview control simulation
+# (using pre-computed approximate gains for demonstration)
+Gi = 1200.0  # integral gain
+Gx = [8e5, 7e3, 30.0]  # state feedback gains
+
+# ZMP reference: step between left and right foot
+step_duration = 0.6  # seconds
+step_width = 0.04  # lateral step (m)
+
+print("=== Preview Control Walking Simulation ===")
+print(f"Preview horizon: {N_preview * T:.2f} s ({N_preview} steps)")
+print(f"Step duration: {step_duration} s")
+print()
+
+# State: [y, ydot, yddot] (lateral direction)
+x = [0.0, 0.0, 0.0]
+integral_error = 0.0
+sim_time = 3.0
+steps_sim = int(sim_time / T)
+
+print("Time(s)  CoM_y(mm)  ZMP_y(mm)  ZMP_ref(mm)")
+print("-" * 50)
+
+for k in range(steps_sim):
+    t = k * T
+    # ZMP reference (alternating between feet)
+    phase = int(t / step_duration)
+    zmp_ref = step_width if phase % 2 == 0 else -step_width
+
+    # Current ZMP
+    p = compute_zmp(x)
+
+    # Tracking error
+    e = p - zmp_ref
+    integral_error += e
+
+    # Control input (simplified - without full preview sum)
+    u = -Gi * integral_error * T
+    u -= Gx[0]*x[0] + Gx[1]*x[1] + Gx[2]*x[2]
+
+    # State update
+    x_new = [
+        A[0][0]*x[0] + A[0][1]*x[1] + A[0][2]*x[2] + B[0]*u,
+        A[1][0]*x[0] + A[1][1]*x[1] + A[1][2]*x[2] + B[1]*u,
+        A[2][0]*x[0] + A[2][1]*x[1] + A[2][2]*x[2] + B[2]*u,
+    ]
+    x = x_new
+
+    if k % 50 == 0:
+        print(f"{t:5.2f}    {x[0]*1000:8.2f}   {p*1000:8.2f}    {zmp_ref*1000:8.2f}")
+
+print()
+print("Note: Full preview control uses future ZMP reference")
+print("values for better anticipation and smoother tracking.")
+`}
+/>
+
+## Walking Pattern Generation Pipeline
+
+The complete pipeline for ZMP-based walking:
+
+1. **Footstep planning**: Define positions and timing of each step
+2. **ZMP reference generation**: Create a piecewise-constant ZMP trajectory
+   that stays within support polygons
+3. **Preview control**: Compute CoM trajectory that tracks the ZMP reference
+4. **Inverse kinematics**: Convert CoM + foot trajectories to joint angles
+
+<CodeEditor
+  initialCode={`import math
+
+# Walking pattern generation with preview control
+g = 9.81
+z_c = 0.8
+omega = math.sqrt(g / z_c)
+T = 0.01
+
+# Footstep plan (x, y positions of each step)
+footsteps = [
+    (0.00, 0.05),   # left foot
+    (0.20, -0.05),  # right foot
+    (0.40, 0.05),   # left foot
+    (0.60, -0.05),  # right foot
+    (0.80, 0.05),   # left foot (final)
+]
+step_duration = 0.6  # seconds per step
+
+print("=== Footstep Plan ===")
+for i, (fx, fy) in enumerate(footsteps):
+    side = "L" if i % 2 == 0 else "R"
+    print(f"  Step {i} ({side}): x={fx:.2f}m, y={fy:+.2f}m")
+
+# Generate ZMP reference (sagittal direction)
+total_time = len(footsteps) * step_duration
+n_steps = int(total_time / T)
+
+print(f"\\nTotal walking time: {total_time:.1f} s")
+print(f"Simulation steps: {n_steps}")
+print()
+
+# ZMP reference for sagittal (x) direction
+zmp_ref_x = []
+for k in range(n_steps):
+    t = k * T
+    phase = min(int(t / step_duration), len(footsteps) - 1)
+    zmp_ref_x.append(footsteps[phase][0])
+
+# Simple forward simulation to show CoM tracking
+x = [0.0, 0.2, 0.0]  # [position, velocity, acceleration]
+C = [1, 0, -z_c/g]
+
+print("Time(s)  CoM_x(m)  ZMP(m)   ZMP_ref(m)  Error(mm)")
+print("-" * 55)
+
+integral_e = 0.0
+Gi, Gx0, Gx1, Gx2 = 800, 5e5, 5e3, 25
+
+for k in range(n_steps):
+    t = k * T
+    p = C[0]*x[0] + C[1]*x[1] + C[2]*x[2]
+    e = p - zmp_ref_x[k]
+    integral_e += e
+
+    u = -Gi*integral_e*T - Gx0*x[0] - Gx1*x[1] - Gx2*x[2]
+    x = [
+        x[0] + T*x[1] + T**2/2*x[2] + T**3/6*u,
+        x[1] + T*x[2] + T**2/2*u,
+        x[2] + T*u,
+    ]
+
+    if k % 60 == 0:
+        print(f"{t:5.2f}    {x[0]:7.4f}   {p:7.4f}   {zmp_ref_x[k]:7.4f}    {e*1000:+6.2f}")
+`}
+/>
+
+## Advantages and Limitations
+
+**Advantages:**
+- Produces smooth CoM trajectories
+- Analytically derived optimal gains
+- Computationally efficient (gains computed offline)
+- Works well for flat terrain walking
+
+**Limitations:**
+- Linear model only (constant CoM height)
+- Fixed preview horizon
+- Cannot handle large perturbations online
+- Assumes pre-planned footsteps
+
+## References
+
+- S. Kajita et al., "Biped Walking Pattern Generation by using Preview Control of Zero-Moment Point," *Proc. IEEE ICRA*, 2003.
+- T. Katayama et al., "Design of an optimal controller for a discrete-time system subject to previewable demand," *Int. J. Control*, 1985.
+
+<InteractiveDemo title="Preview Control Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive preview control with adjustable preview window coming soon.
+  </p>
+</InteractiveDemo>

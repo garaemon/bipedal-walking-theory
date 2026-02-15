@@ -1,0 +1,190 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { TaskPriorityDiagram } from "@/components/diagrams/WholeBodyControlDiagram";
+
+# Whole-Body Motion Control
+
+Walking robots have many degrees of freedom that must be coordinated to
+achieve multiple objectives simultaneously: maintaining balance, placing
+feet, controlling posture, and avoiding joint limits.
+
+## Forward Kinematics
+
+Given joint angles $\mathbf{q} \in \mathbb{R}^n$, the forward kinematics
+map computes the end-effector (e.g., foot) position and orientation:
+
+$$
+\mathbf{x} = f(\mathbf{q})
+$$
+
+where $\mathbf{x} \in \mathbb{R}^m$ is the task-space position ($m \leq n$).
+
+## Jacobian
+
+The **Jacobian** $\mathbf{J}$ relates joint velocities to task-space velocities:
+
+$$
+\dot{\mathbf{x}} = \mathbf{J}(\mathbf{q})\dot{\mathbf{q}}
+$$
+
+where $\mathbf{J} = \frac{\partial f}{\partial \mathbf{q}} \in \mathbb{R}^{m \times n}$.
+
+For a humanoid robot, the Jacobian maps joint velocities to CoM velocity,
+foot velocity, hand velocity, etc.
+
+## Inverse Kinematics
+
+Given a desired task-space velocity $\dot{\mathbf{x}}_{des}$, find joint velocities:
+
+$$
+\dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des}
+$$
+
+where $\mathbf{J}^{\dagger}$ is the pseudoinverse of the Jacobian.
+
+When the robot has more joints than task dimensions ($n > m$), the system is
+**redundant** and the pseudoinverse gives the minimum-norm solution.
+
+### Null Space
+
+The null space of $\mathbf{J}$ represents motions that do not affect the
+task-space output. We can add secondary objectives:
+
+$$
+\dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des} + (\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0
+$$
+
+where $\dot{\mathbf{q}}_0$ is an arbitrary joint velocity for the secondary task,
+projected onto the null space by $(\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})$.
+
+## Task-Priority Framework
+
+<TaskPriorityDiagram />
+
+For a humanoid robot, multiple tasks are organized by priority:
+
+$$
+\dot{\mathbf{q}} = \dot{\mathbf{q}}_1 + N_1(\dot{\mathbf{q}}_2 + N_2(\dot{\mathbf{q}}_3 + \cdots))
+$$
+
+where $\dot{\mathbf{q}}_i = \mathbf{J}_i^{\dagger}(\dot{\mathbf{x}}_i - \mathbf{J}_i \dot{\mathbf{q}}_{i-1})$
+and $N_i = \mathbf{I} - \mathbf{J}_i^{\dagger}\mathbf{J}_i$ is the null-space projector.
+
+Higher-priority tasks are guaranteed to be satisfied; lower-priority tasks
+only use remaining degrees of freedom.
+
+<CodeEditor
+  initialCode={`import math
+
+# 2-link planar robot IK demonstration
+# (simplified whole-body control example)
+
+l1 = 0.4  # link 1 length (m)
+l2 = 0.35  # link 2 length (m)
+
+def forward_kinematics(q1, q2):
+    """Compute end-effector position from joint angles."""
+    x = l1 * math.cos(q1) + l2 * math.cos(q1 + q2)
+    y = l1 * math.sin(q1) + l2 * math.sin(q1 + q2)
+    return x, y
+
+def compute_jacobian(q1, q2):
+    """Compute 2x2 Jacobian."""
+    J11 = -l1 * math.sin(q1) - l2 * math.sin(q1 + q2)
+    J12 = -l2 * math.sin(q1 + q2)
+    J21 = l1 * math.cos(q1) + l2 * math.cos(q1 + q2)
+    J22 = l2 * math.cos(q1 + q2)
+    return J11, J12, J21, J22
+
+# Start configuration
+q1, q2 = math.pi/4, -math.pi/6
+x, y = forward_kinematics(q1, q2)
+print("=== 2-Link Robot Inverse Kinematics ===")
+print(f"Initial config: q1={math.degrees(q1):.1f} deg, q2={math.degrees(q2):.1f} deg")
+print(f"End-effector: ({x:.4f}, {y:.4f}) m")
+print()
+
+# Target position
+x_target, y_target = 0.5, 0.3
+print(f"Target: ({x_target:.3f}, {y_target:.3f}) m")
+print()
+
+# IK using Jacobian pseudoinverse (iterative)
+dt = 0.05
+gain = 2.0
+print("Iter  q1(deg)  q2(deg)  x(m)     y(m)     error(mm)")
+print("-" * 55)
+
+for i in range(20):
+    x, y = forward_kinematics(q1, q2)
+    ex, ey = x_target - x, y_target - y
+    error = math.sqrt(ex**2 + ey**2)
+
+    if i % 2 == 0:
+        print(f" {i:2d}   {math.degrees(q1):7.2f}  {math.degrees(q2):7.2f}  "
+              f"{x:7.4f}  {y:7.4f}  {error*1000:7.3f}")
+
+    if error < 0.001:
+        print(f"\\nConverged in {i} iterations!")
+        break
+
+    # Jacobian pseudoinverse (2x2 case = inverse)
+    J11, J12, J21, J22 = compute_jacobian(q1, q2)
+    det = J11 * J22 - J12 * J21
+
+    if abs(det) < 1e-6:
+        print("Near singularity!")
+        break
+
+    # Inverse of 2x2 Jacobian
+    dq1 = (J22 * ex - J12 * ey) / det * gain * dt
+    dq2 = (-J21 * ex + J11 * ey) / det * gain * dt
+
+    q1 += dq1
+    q2 += dq2
+`}
+/>
+
+## Quadratic Programming for Multi-Task Control
+
+Modern whole-body controllers formulate the problem as a **QP**:
+
+$$
+\min_{\dot{\mathbf{q}}} \sum_{i} w_i \|\mathbf{J}_i\dot{\mathbf{q}} - \dot{\mathbf{x}}_{i,des}\|^2
+$$
+
+subject to:
+- Joint position limits: $\mathbf{q}_{min} \leq \mathbf{q} + \dot{\mathbf{q}}dt \leq \mathbf{q}_{max}$
+- Joint velocity limits: $|\dot{\mathbf{q}}| \leq \dot{\mathbf{q}}_{max}$
+- Torque limits: $|\boldsymbol{\tau}| \leq \boldsymbol{\tau}_{max}$
+
+This approach handles inequality constraints that the null-space method cannot.
+
+## Operational Space Control
+
+Khatib's operational space formulation enables force control in task space:
+
+$$
+\mathbf{F} = \Lambda(\mathbf{q})\ddot{\mathbf{x}}_{des} + \boldsymbol{\mu}(\mathbf{q}, \dot{\mathbf{q}}) + \mathbf{p}(\mathbf{q})
+$$
+
+where $\Lambda = (J M^{-1} J^T)^{-1}$ is the operational space inertia matrix,
+$\boldsymbol{\mu}$ is the Coriolis/centrifugal term, and $\mathbf{p}$ is gravity.
+
+The corresponding joint torques are:
+
+$$
+\boldsymbol{\tau} = \mathbf{J}^T \mathbf{F} + (\mathbf{I} - \mathbf{J}^T \bar{\mathbf{J}}^T)\boldsymbol{\tau}_0
+$$
+
+## References
+
+- O. Khatib, "A Unified Approach for Motion and Force Control of Robot Manipulators: The Operational Space Formulation," *IEEE J. Robotics and Automation*, 1987.
+- L. Sentis and O. Khatib, "Synthesis of Whole-Body Behaviors through Hierarchical Control of Behavioral Primitives," *Int. J. Humanoid Robotics*, 2005.
+
+<InteractiveDemo title="Robot Arm IK Demo">
+  <p className="text-sm text-gray-500">
+    Interactive robot arm IK with task priority visualization coming soon.
+  </p>
+</InteractiveDemo>
