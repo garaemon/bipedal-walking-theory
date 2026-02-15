@@ -1,13 +1,23 @@
 import { notFound } from "next/navigation";
 import { chapters } from "@/lib/chapters";
 
-// Map slugs to content components loaded dynamically
 const contentMap: Record<
   string,
   () => Promise<{ default: React.ComponentType }>
 > = {
   "01-rigid-body-dynamics": () => import("@/content/01-rigid-body-dynamics.mdx"),
 };
+
+function ChapterPlaceholder({ title }: { title: string }) {
+  return (
+    <div className="py-12 text-center">
+      <h1 className="mb-4 text-3xl font-bold text-gray-900">{title}</h1>
+      <p className="text-lg text-gray-500">
+        This chapter is coming soon. Stay tuned!
+      </p>
+    </div>
+  );
+}
 
 export function generateStaticParams() {
   return chapters.map((chapter) => ({ slug: chapter.slug }));
@@ -30,9 +40,18 @@ export default async function ChapterPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const chapter = chapters.find((c) => c.slug === slug);
+  if (!chapter) {
+    notFound();
+  }
+
   const loader = contentMap[slug];
   if (!loader) {
-    notFound();
+    return (
+      <article className="prose prose-gray mx-auto max-w-3xl">
+        <ChapterPlaceholder title={chapter.title} />
+      </article>
+    );
   }
 
   const { default: Content } = await loader();

@@ -9,7 +9,7 @@ export function Header() {
         </Link>
         <nav className="ml-8 flex gap-4">
           <Link
-            href="/chapters/01-rigid-body-dynamics"
+            href="/"
             className="text-sm text-gray-600 hover:text-gray-900"
           >
             Chapters

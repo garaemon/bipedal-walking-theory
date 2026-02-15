@@ -14,7 +14,7 @@ export function Sidebar() {
           Chapters
         </h2>
         <ul className="space-y-1">
-          {chapters.map((chapter) => {
+          {chapters.map((chapter, index) => {
             const href = `/chapters/${chapter.slug}`;
             const isActive = pathname === href;
             return (
@@ -27,6 +27,7 @@ export function Sidebar() {
                       : "text-gray-700 hover:bg-gray-100"
                   }`}
                 >
+                  <span className="mr-2 text-gray-400">{index + 1}.</span>
                   {chapter.title}
                 </Link>
               </li>
