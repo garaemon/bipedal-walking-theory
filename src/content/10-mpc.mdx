@@ -1,0 +1,205 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { MPCHorizonDiagram } from "@/components/diagrams/MPCDiagram";
+
+# Model Predictive Control (MPC)
+
+Model Predictive Control optimizes control inputs over a future horizon at
+each time step, providing a powerful framework for walking that handles
+constraints explicitly.
+
+## MPC Formulation
+
+At each time step $k$, solve the optimization:
+
+<MathBlock tex="\min_{u_0, \ldots, u_{N-1}} \sum_{i=0}^{N-1} \left[ \|\mathbf{x}_i - \mathbf{x}_i^{ref}\|^2_Q + \|u_i\|^2_R \right] + \|\mathbf{x}_N - \mathbf{x}_N^{ref}\|^2_{Q_f}" />
+
+subject to:
+- Dynamics: $\mathbf{x}_{i+1} = A\mathbf{x}_i + Bu_i$
+- State constraints: $\mathbf{x}_i \in \mathcal{X}$
+- Input constraints: $u_i \in \mathcal{U}$
+- ZMP constraint: $p_i \in \text{support polygon}$
+
+Apply only the first input $u_0^*$, then re-solve at the next step.
+
+<MPCHorizonDiagram />
+
+## Linear MPC with LIPM
+
+Using the LIPM state-space model from Chapter 5, the MPC becomes a
+**Quadratic Program** (QP) that can be solved efficiently.
+
+### State-Space Model
+
+$$
+\mathbf{x}_{k+1} = A\mathbf{x}_k + Bu_k, \quad p_k = C\mathbf{x}_k
+$$
+
+with $\mathbf{x} = [x, \dot{x}, \ddot{x}]^T$, $u = \dddot{x}$ (jerk),
+and $p$ the ZMP position.
+
+### QP Formulation
+
+The MPC problem can be written as:
+
+$$
+\min_{\mathbf{U}} \frac{1}{2}\mathbf{U}^T H \mathbf{U} + \mathbf{f}^T \mathbf{U}
+$$
+
+subject to $A_{ineq}\mathbf{U} \leq \mathbf{b}_{ineq}$
+
+where $\mathbf{U} = [u_0, u_1, \ldots, u_{N-1}]^T$ is the stacked control input.
+
+<CodeEditor
+  initialCode={`import math
+
+# Simple Linear MPC for LIPM walking
+# Using a basic gradient descent solver (for demonstration)
+
+g = 9.81
+z_c = 0.8
+T = 0.02  # sampling period
+N = 40    # prediction horizon
+
+# LIPM matrices
+A = [[1, T, T**2/2], [0, 1, T], [0, 0, 1]]
+B = [T**3/6, T**2/2, T]
+C = [1, 0, -z_c/g]
+
+def mat_vec_mul(M, v):
+    return [sum(M[i][j]*v[j] for j in range(len(v))) for i in range(len(M))]
+
+def predict_trajectory(x0, U):
+    """Predict state and ZMP trajectory given control sequence."""
+    states = [x0[:]]
+    zmps = []
+    x = x0[:]
+    for u in U:
+        zmp = sum(C[j]*x[j] for j in range(3))
+        zmps.append(zmp)
+        x_new = [sum(A[i][j]*x[j] for j in range(3)) + B[i]*u for i in range(3)]
+        states.append(x_new[:])
+        x = x_new
+    zmps.append(sum(C[j]*x[j] for j in range(3)))
+    return states, zmps
+
+# ZMP reference (step pattern in x-direction)
+step_duration = 0.6
+step_length = 0.15
+
+def get_zmp_ref(t_start, N_steps):
+    refs = []
+    for i in range(N_steps):
+        t = t_start + i * T
+        phase = int(t / step_duration)
+        refs.append(phase * step_length)
+    return refs
+
+# Initial state
+x = [0.0, 0.3, 0.0]  # start with forward velocity
+
+# MPC weights
+Q_zmp = 1.0    # ZMP tracking weight
+R_u = 1e-6     # control effort weight
+
+print("=== Linear MPC Walking ===")
+print(f"Horizon: {N} steps ({N*T:.2f}s)")
+print(f"Step length: {step_length}m, Step duration: {step_duration}s")
+print()
+
+# Simulate for 2 seconds
+sim_steps = int(2.0 / T)
+print("Time(s)  CoM_x(m)  ZMP(m)   ZMP_ref(m)  Jerk")
+print("-" * 55)
+
+for k in range(sim_steps):
+    t = k * T
+    zmp_ref = get_zmp_ref(t, N + 1)
+
+    # Simple MPC: solve with gradient descent (simplified)
+    U = [0.0] * N
+    learning_rate = 0.1
+
+    for opt_iter in range(30):
+        states, zmps = predict_trajectory(x, U)
+        # Gradient of cost w.r.t. U
+        grad = [0.0] * N
+        for i in range(N):
+            zmp_error = zmps[i] - zmp_ref[i]
+            grad[i] = 2 * Q_zmp * zmp_error + 2 * R_u * U[i]
+        # Update
+        for i in range(N):
+            U[i] -= learning_rate * grad[i]
+            U[i] = max(-50, min(50, U[i]))  # clamp jerk
+
+    # Apply first control input
+    u_applied = U[0]
+    zmp = sum(C[j]*x[j] for j in range(3))
+    phase = int(t / step_duration)
+    zmp_ref_now = phase * step_length
+
+    if k % 5 == 0:
+        print(f"{t:5.2f}    {x[0]:7.4f}  {zmp:7.4f}   {zmp_ref_now:7.4f}    {u_applied:7.2f}")
+
+    # State update
+    x = [sum(A[i][j]*x[j] for j in range(3)) + B[i]*u_applied for i in range(3)]
+`}
+/>
+
+## Handling Constraints
+
+A key advantage of MPC over preview control is explicit **constraint handling**:
+
+### ZMP Constraints
+$$
+p_{x,min} \leq C\mathbf{x}_i \leq p_{x,max}
+$$
+
+The bounds change with footstep timing (support polygon).
+
+### Kinematic Constraints
+- Maximum step length
+- Foot clearance height
+- Joint angle limits
+
+### Timing Adaptation
+MPC can optimize **when** to take steps, not just the CoM trajectory.
+This enables reactive stepping in response to pushes.
+
+## Nonlinear MPC
+
+For more accurate walking, nonlinear MPC uses the full robot dynamics:
+
+$$
+\min_{\mathbf{u}(\cdot)} \int_0^T L(\mathbf{x}, \mathbf{u}) dt + V_f(\mathbf{x}(T))
+$$
+
+subject to:
+- Full nonlinear dynamics: $\dot{\mathbf{x}} = f(\mathbf{x}, \mathbf{u})$
+- Contact complementarity: $\lambda \geq 0, \phi(\mathbf{q}) \geq 0, \lambda \phi = 0$
+
+Nonlinear MPC is computationally expensive but handles:
+- Variable CoM height
+- Angular momentum
+- Multi-contact scenarios
+
+## Real-Time Considerations
+
+Walking MPC must solve within the control loop (~1-10 ms). Strategies:
+
+1. **Warm starting**: use previous solution as initial guess
+2. **Early termination**: accept suboptimal solutions after fixed iterations
+3. **Condensed formulation**: eliminate states to reduce problem size
+4. **Tailored solvers**: exploit sparsity structure of walking QPs
+
+## References
+
+- P.-B. Wieber, "Trajectory Free Linear Model Predictive Control for Stable Walking in the Presence of Strong Perturbations," *Proc. IEEE-RAS Humanoids*, 2006.
+- A. Herdt et al., "Online Walking Motion Generation with Automatic Footstep Placement," *Advanced Robotics*, 2010.
+
+<InteractiveDemo title="MPC Horizon Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive MPC with adjustable horizon and constraints coming soon.
+  </p>
+</InteractiveDemo>

@@ -1,0 +1,243 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { SimToRealPipelineDiagram } from "@/components/diagrams/SimToRealDiagram";
+
+# Sim-to-Real Transfer
+
+Training locomotion policies in simulation is fast and safe, but transferring
+to real robots is challenging due to the **sim-to-real gap** — differences
+between simulated and real-world physics.
+
+<SimToRealPipelineDiagram />
+
+## The Sim-to-Real Gap
+
+Sources of discrepancy between simulation and reality:
+
+| Source | Example |
+|--------|---------|
+| **Dynamics** | Inaccurate mass, friction, contact models |
+| **Actuators** | Motor delays, torque limits, backlash |
+| **Sensors** | Noise, bias, calibration errors |
+| **Environment** | Terrain variations, wind, obstacles |
+
+## Domain Randomization
+
+**Domain randomization** trains the policy across a wide distribution of
+simulation parameters, forcing it to be robust to variations.
+
+### What to Randomize
+
+$$
+\xi \sim \mathcal{U}(\xi_{min}, \xi_{max})
+$$
+
+| Parameter | Typical Range |
+|-----------|--------------|
+| Mass | $\pm 30\%$ of nominal |
+| Friction | $[0.3, 1.5]$ |
+| Motor strength | $\pm 20\%$ |
+| Sensor noise | $\sigma \in [0, 0.05]$ |
+| Action delay | $[0, 30]$ ms |
+| Ground slope | $\pm 5°$ |
+
+<CodeEditor
+  initialCode={`import random
+import math
+
+# Domain randomization demonstration
+random.seed(42)
+
+class RandomizedEnvironment:
+    """LIPM with randomized parameters."""
+    def __init__(self):
+        self.randomize()
+
+    def randomize(self):
+        """Randomize physics parameters."""
+        nominal_mass = 30.0
+        nominal_height = 0.8
+        nominal_friction = 0.8
+
+        self.mass = nominal_mass * random.uniform(0.7, 1.3)
+        self.z_c = nominal_height * random.uniform(0.85, 1.15)
+        self.friction = nominal_friction * random.uniform(0.5, 1.5)
+        self.motor_delay = random.uniform(0, 0.03)
+        self.sensor_noise = random.uniform(0, 0.02)
+        self.g = 9.81
+
+        self.omega = math.sqrt(self.g / self.z_c)
+
+    def get_params_str(self):
+        return (f"mass={self.mass:.1f}kg, z_c={self.z_c:.3f}m, "
+                f"friction={self.friction:.2f}, delay={self.motor_delay*1000:.0f}ms")
+
+# Show parameter distributions across environments
+print("=== Domain Randomization: Parameter Samples ===")
+print()
+print("Env  Mass(kg)  Height(m)  Friction  Delay(ms)  omega(rad/s)")
+print("-" * 65)
+
+env = RandomizedEnvironment()
+omega_values = []
+
+for i in range(10):
+    env.randomize()
+    omega_values.append(env.omega)
+    print(f" {i:2d}   {env.mass:6.1f}     {env.z_c:.3f}     "
+          f"{env.friction:.2f}      {env.motor_delay*1000:4.1f}       "
+          f"{env.omega:.3f}")
+
+print()
+avg_omega = sum(omega_values) / len(omega_values)
+std_omega = math.sqrt(sum((w - avg_omega)**2 for w in omega_values) / len(omega_values))
+print(f"omega range: [{min(omega_values):.3f}, {max(omega_values):.3f}]")
+print(f"omega mean: {avg_omega:.3f}, std: {std_omega:.3f}")
+print()
+
+# Simulate effect on walking
+print("=== Effect on Walking Behavior ===")
+print()
+print("With a fixed controller, different environments produce:")
+print()
+
+for i in range(5):
+    env.randomize()
+    # Simple walking step with LIPM
+    x = -0.05
+    xdot = 0.3
+    dt = 0.01
+    step_time = 0.5
+
+    for _ in range(int(step_time / dt)):
+        xddot = env.omega**2 * x  # simplified
+        xdot += xddot * dt
+        x += xdot * dt
+
+    print(f"  Env {i}: omega={env.omega:.3f} -> final_x={x:.4f}m, "
+          f"vel={xdot:.4f}m/s")
+
+print()
+print("A robust policy must handle all these variations!")
+`}
+/>
+
+## System Identification
+
+Rather than randomizing everything, **system identification** measures
+the real robot's parameters to improve simulation accuracy.
+
+### Online System ID
+
+Estimate parameters during deployment:
+
+$$
+\hat{\xi}_{k+1} = \hat{\xi}_k + K_k(y_k - \hat{y}_k(\hat{\xi}_k))
+$$
+
+where $\hat{\xi}$ is the parameter estimate, $y_k$ is the measured output,
+and $K_k$ is the adaptation gain.
+
+## Rapid Motor Adaptation (RMA)
+
+RMA combines the strengths of domain randomization and online adaptation:
+
+1. **Base policy** $\pi(a | s, z)$: takes state and an environment
+   embedding $z$ as input
+2. **Adaptation module** $\hat{z} = f(s_{t-H:t})$: estimates $z$
+   from recent state history
+
+During training (simulation):
+- Train base policy with privileged environment information $z$
+- Train adaptation module to predict $z$ from state history
+
+During deployment (real robot):
+- Adaptation module estimates $z$ online from sensor data
+- Base policy acts using estimated $z$
+
+<CodeEditor
+  initialCode={`import math
+import random
+
+# Simplified Rapid Motor Adaptation concept
+random.seed(42)
+
+# Environment parameters (the "latent" z)
+true_params = {
+    "mass_ratio": 1.2,     # 20% heavier than nominal
+    "friction": 0.6,       # lower friction
+    "motor_strength": 0.9,  # 10% weaker motors
+}
+
+# Simulate state history with these parameters
+def simulate_step(x, v, force, mass_ratio, friction):
+    dt = 0.01
+    a = force / (30.0 * mass_ratio) - friction * v * 0.1
+    v_new = v + a * dt
+    x_new = x + v_new * dt
+    return x_new, v_new
+
+# Generate state history
+print("=== Rapid Motor Adaptation Demo ===")
+print()
+print("True environment parameters:")
+for k, v in true_params.items():
+    print(f"  {k}: {v}")
+print()
+
+history = []
+x, v = 0.0, 0.0
+for t in range(50):
+    force = 5.0 * math.sin(t * 0.2)  # probing signal
+    x, v = simulate_step(x, v, force,
+                          true_params["mass_ratio"],
+                          true_params["friction"])
+    history.append((x, v, force))
+
+# "Adaptation module": estimate parameters from history
+# (In practice, this is a neural network)
+# Simple estimation: use response characteristics
+responses = [h[1] for h in history[10:]]  # velocities
+forces = [h[2] for h in history[10:]]
+
+# Estimate mass ratio from force-acceleration relationship
+accels = [(responses[i+1] - responses[i]) / 0.01 for i in range(len(responses)-1)]
+avg_response = sum(abs(a) for a in accels) / len(accels)
+nominal_response = 0.17  # expected for nominal params
+estimated_mass_ratio = nominal_response / avg_response * 1.0
+
+# Estimate friction from velocity decay
+vel_decay = sum(abs(responses[i+1]) - abs(responses[i])
+                for i in range(len(responses)-1) if abs(forces[i]) < 0.1)
+
+print("Adaptation module estimates:")
+print(f"  mass_ratio: {estimated_mass_ratio:.2f} (true: {true_params['mass_ratio']:.2f})")
+print()
+print("With adaptation, the policy adjusts its behavior:")
+print("  - Heavier mass -> stronger push-off")
+print("  - Lower friction -> shorter steps")
+print("  - Weaker motors -> conservative gait")
+`}
+/>
+
+## Key Results in Sim-to-Real Walking
+
+| Year | System | Method | Achievement |
+|------|--------|--------|-------------|
+| 2018 | Cassie | Domain randomization | Outdoor walking |
+| 2020 | ANYmal | Teacher-student | Blind locomotion |
+| 2023 | Digit | RMA | Multi-terrain |
+| 2024 | Various | Large-scale RL | Agile humanoid locomotion |
+
+## References
+
+- J. Tobin et al., "Domain Randomization for Transferring Deep Neural Networks from Simulation to the Real World," *Proc. IROS*, 2017.
+- I. Radosavovic et al., "Real-World Humanoid Locomotion with Reinforcement Learning," *Science Robotics*, 2024.
+- A. Kumar et al., "RMA: Rapid Motor Adaptation for Legged Robots," *RSS*, 2021.
+
+<InteractiveDemo title="Domain Randomization Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive domain randomization parameter visualization coming soon.
+  </p>
+</InteractiveDemo>

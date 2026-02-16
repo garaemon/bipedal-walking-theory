@@ -1,0 +1,148 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+
+# Frontiers of Bipedal Locomotion
+
+This chapter surveys cutting-edge research pushing the boundaries of
+bipedal walking and running, from transformer-based controllers to
+agile humanoid skills.
+
+## Transformer-Based Locomotion Controllers
+
+Recent work applies transformer architectures to locomotion:
+
+### Locomotion Transformers
+
+Instead of reactive policies, transformers process **sequences of
+observations** to make decisions:
+
+$$
+a_t = f_{transformer}(o_{t-H}, o_{t-H+1}, \ldots, o_t)
+$$
+
+Key advantages:
+- **Long-horizon reasoning**: attend to relevant past events
+- **In-context adaptation**: adapt to new terrains without retraining
+- **Multi-task learning**: single model handles diverse locomotion tasks
+
+### Cross-Embodiment Transfer
+
+Foundation models trained on diverse robot morphologies can transfer
+locomotion skills across different humanoid platforms.
+
+## Agile Humanoid Skills
+
+### Soccer
+
+Humanoid robots playing soccer autonomously:
+- Dynamic kicking with whole-body coordination
+- Getting up from falls in diverse poses
+- Multi-agent coordination and strategy
+- Real-time vision-based opponent tracking
+
+### Parkour
+
+Autonomous parkour requires:
+- **Perception**: real-time 3D terrain mapping
+- **Planning**: selecting feasible routes through obstacles
+- **Control**: high-force jumping, precise landing, recovery
+- **Timing**: split-second decisions during flight phases
+
+### Running and Jumping
+
+Agile bipedal running involves:
+- Flight phases (both feet off ground)
+- High-impact landing absorption
+- Dynamic stability beyond ZMP/DCM frameworks
+
+## Vision-Based Locomotion
+
+Replacing explicit terrain maps with end-to-end learned perception:
+
+$$
+a_t = \pi_\theta(o^{proprio}_t, o^{visual}_t)
+$$
+
+The policy directly maps proprioceptive data and camera images to actions.
+
+### Challenges
+- **Latency**: visual processing must be fast enough for reactive control
+- **Robustness**: handle lighting changes, occlusions, motion blur
+- **Generalization**: work on unseen terrains and environments
+
+### Height Map Estimation
+
+An intermediate representation approach:
+1. Estimate local terrain height map from depth camera
+2. Feed height map + proprioception to locomotion policy
+3. Separate perception training from locomotion training
+
+## Large-Scale Training
+
+Modern approaches leverage massive computation:
+
+| Aspect | Scale |
+|--------|-------|
+| Parallel environments | 4,000 - 100,000 |
+| Training time | 10 min - 24 hours |
+| GPU | 1 - 64 GPUs |
+| Simulation steps | $10^9$ - $10^{11}$ |
+
+The key enabler: GPU-accelerated physics simulation (IsaacGym, MuJoCo XLA,
+Brax) running thousands of environments in parallel.
+
+## Open Problems
+
+### 1. Whole-Body Loco-Manipulation
+Combining walking with object manipulation requires coordinating
+locomotion stability with arm/hand forces.
+
+### 2. Energy Efficiency
+RL-trained gaits often use 3-5x more energy than passive dynamic walkers.
+How can we combine learning with energy-efficient design principles?
+
+### 3. Long-Horizon Planning
+Current controllers are reactive. Real-world navigation requires planning
+minutes ahead: choosing routes, anticipating terrain changes, and
+managing energy budgets.
+
+### 4. Robust Perception
+Operating in rain, snow, darkness, and cluttered environments with
+unreliable sensors remains challenging.
+
+### 5. Safety and Verification
+How to guarantee a learned controller will never take dangerous actions?
+Formal verification of neural network policies is an open research area.
+
+### 6. Human-Robot Interaction
+Walking alongside, carrying, or physically assisting humans requires
+understanding human intention and ensuring safety.
+
+## Timeline of Key Breakthroughs
+
+| Year | Milestone |
+|------|-----------|
+| 1969 | ZMP concept (Vukobratovic) |
+| 1990 | Passive dynamic walking (McGeer) |
+| 2001 | 3D-LIPM for walking (Kajita) |
+| 2003 | Preview control for ZMP (Kajita) |
+| 2006 | Capture point (Pratt) |
+| 2014 | HZD on hardware (Ames) |
+| 2018 | DeepMimic (Peng) |
+| 2019 | Sim-to-real Cassie (Xie) |
+| 2023 | Real-world humanoid RL (Radosavovic) |
+| 2024 | Agile humanoid skills (Haarnoja, Cheng) |
+| 2025 | Foundation models for locomotion |
+
+## References
+
+- T. Haarnoja et al., "Learning Agile Soccer Skills for a Bipedal Robot with Deep Reinforcement Learning," *Science Robotics*, 2024.
+- I. Radosavovic et al., "Humanoid Locomotion as Next Token Prediction," *arXiv*, 2024.
+- Z. Zhuang et al., "Robot Parkour Learning," *CoRL*, 2023.
+- X. Cheng et al., "Extreme Parkour with Legged Robots," *ICRA*, 2024.
+
+<InteractiveDemo title="Research Frontier">
+  <p className="text-sm text-gray-500">
+    Explore the latest papers and demos in bipedal locomotion research.
+  </p>
+</InteractiveDemo>

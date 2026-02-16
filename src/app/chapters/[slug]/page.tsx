@@ -16,6 +16,11 @@ const contentMap: Record<
   "08-whole-body-control": () => import("@/content/08-whole-body-control.mdx"),
   "09-hybrid-zero-dynamics": () =>
     import("@/content/09-hybrid-zero-dynamics.mdx"),
+  "10-mpc": () => import("@/content/10-mpc.mdx"),
+  "11-reinforcement-learning": () =>
+    import("@/content/11-reinforcement-learning.mdx"),
+  "12-sim-to-real": () => import("@/content/12-sim-to-real.mdx"),
+  "13-frontiers": () => import("@/content/13-frontiers.mdx"),
 };
 
 function ChapterPlaceholder({ title }: { title: string }) {
