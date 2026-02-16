@@ -1,0 +1,207 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { RLLoopDiagram } from "@/components/diagrams/RLDiagram";
+
+# 歩行のための強化学習
+
+強化学習 (RL) は、シミュレーション内での試行錯誤を通じてロボットが歩行行動を発見できるようにすることで、二足歩行に革命をもたらしました。手動で設計されたコントローラを凌駕することも少なくありません。
+
+## 歩行のためのMDP定式化
+
+歩行は**マルコフ決定過程** (MDP) として定式化されます:
+
+- **状態** $s$: 関節角度、速度、体の姿勢、接触状態
+- **行動** $a$: 目標関節位置またはトルク
+- **報酬** $r(s, a)$: 望ましい歩行行動を促進するように設計
+- **遷移** $P(s'|s, a)$: 物理シミュレーションに従う
+
+目標は、期待累積報酬を最大化する方策 $\pi_\theta(a|s)$ を見つけることです:
+
+$$
+J(\theta) = \mathbb{E}_{\pi_\theta}\left[\sum_{t=0}^{T} \gamma^t r(s_t, a_t)\right]
+$$
+
+<RLLoopDiagram />
+
+## 報酬関数の設計
+
+報酬関数は極めて重要であり、通常以下の要素を含みます:
+
+$$
+r = w_v r_{velocity} + w_e r_{energy} + w_a r_{alive} + w_s r_{style}
+$$
+
+| 要素 | 数式 | 目的 |
+|-----------|---------|---------|
+| 速度 | $r_v = \exp(-\|v - v_{target}\|^2)$ | 目標速度の追従 |
+| エネルギー | $r_e = -\|\boldsymbol{\tau}\|^2$ | エネルギー消費の最小化 |
+| 生存 | $r_a = +1$ per step | 生存の促進 |
+| スタイル | $r_s = -\|q - q_{ref}\|^2$ | 参照動作への追従 |
+
+### よくある落とし穴
+
+- **報酬ハッキング**: ロボットが予想外の方法で報酬を最大化する（例: 歩行ではなく滑走する）
+- **スパース報酬**: 「目標に到達する」だけでは学習信号が不十分
+- **過度な制約**: スタイルペナルティが多すぎると探索を妨げる
+
+## 方策勾配法
+
+### PPO (近接方策最適化)
+
+歩行制御で最も広く使用されているアルゴリズムです:
+
+$$
+L^{CLIP}(\theta) = \mathbb{E}\left[\min\left(r_t(\theta)A_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t\right)\right]
+$$
+
+ここで $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ は確率比、$A_t$ はアドバンテージ推定値です。
+
+PPOはサンプル効率と安定性のバランスが良いため、広く使われています。
+
+<CodeEditor
+  initialCode={`import math
+import random
+
+# Simplified RL for a 1D walking task
+# (CartPole-like balance + forward velocity)
+
+random.seed(42)
+
+class SimpleWalker:
+    """1D walker: state = [position, velocity, angle, angular_vel]"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.x = 0.0
+        self.v = 0.0
+        self.theta = random.uniform(-0.1, 0.1)
+        self.omega = 0.0
+        return self.get_state()
+
+    def get_state(self):
+        return [self.x, self.v, self.theta, self.omega]
+
+    def step(self, action):
+        # Simplified dynamics
+        force = action * 10.0  # scale action
+        dt = 0.02
+        g = 9.81
+        l = 1.0
+        m = 1.0
+
+        # Update angle (inverted pendulum)
+        alpha = (g * math.sin(self.theta) + force * math.cos(self.theta)) / l
+        self.omega += alpha * dt
+        self.theta += self.omega * dt
+
+        # Update position
+        self.v += force * dt / m
+        self.x += self.v * dt
+
+        # Compute reward
+        alive = abs(self.theta) < 0.5  # not fallen
+        reward = 0.0
+        if alive:
+            reward += 1.0  # alive bonus
+            reward += 0.5 * min(self.v, 1.0)  # forward velocity
+            reward -= 0.1 * abs(self.theta)  # upright bonus
+            reward -= 0.01 * action**2  # energy penalty
+
+        done = not alive
+        return self.get_state(), reward, done
+
+# Simple policy: linear function of state
+# theta_policy = weights
+weights = [0.0, 0.0, 0.0, 0.0]
+
+def compute_policy(state, w):
+    """Linear policy: action = w . state"""
+    action = sum(w[i] * state[i] for i in range(4))
+    return max(-1, min(1, action))  # clip to [-1, 1]
+
+def evaluate_policy(env, w, max_steps=200):
+    """Run one episode and return total reward."""
+    state = env.reset()
+    total_reward = 0
+    for _ in range(max_steps):
+        action = compute_policy(state, w)
+        state, reward, done = env.step(action)
+        total_reward += reward
+        if done:
+            break
+    return total_reward
+
+# Simple evolution strategy for learning
+env = SimpleWalker()
+best_weights = weights[:]
+best_reward = evaluate_policy(env, best_weights)
+
+print("=== Simple RL Training (Evolution Strategy) ===")
+print(f"Initial reward: {best_reward:.2f}")
+print()
+print("Gen  Best_Reward  Avg_Reward  Weights")
+print("-" * 60)
+
+n_generations = 30
+n_population = 10
+noise_std = 0.5
+
+for gen in range(n_generations):
+    rewards = []
+    population = []
+    for _ in range(n_population):
+        w = [best_weights[i] + random.gauss(0, noise_std) for i in range(4)]
+        r = evaluate_policy(env, w)
+        rewards.append(r)
+        population.append(w)
+
+    avg_r = sum(rewards) / len(rewards)
+    best_idx = rewards.index(max(rewards))
+    if rewards[best_idx] > best_reward:
+        best_reward = rewards[best_idx]
+        best_weights = population[best_idx][:]
+
+    if gen % 5 == 0:
+        w_str = [f"{w:.2f}" for w in best_weights]
+        print(f" {gen:2d}      {best_reward:7.2f}     {avg_r:7.2f}    {w_str}")
+
+    noise_std *= 0.95  # decay noise
+
+print(f"\\nFinal best reward: {best_reward:.2f}")
+print(f"Learned weights: {[f'{w:.3f}' for w in best_weights]}")
+`}
+/>
+
+## モーション模倣 (DeepMimic)
+
+ゼロから学習する代わりに、**モーション模倣**はモーションキャプチャやアニメーションからの参照動作を利用します:
+
+$$
+r_{imitation} = w_p \exp(-\|q - q^{ref}\|^2) + w_v \exp(-\|\dot{q} - \dot{q}^{ref}\|^2)
+$$
+
+これにより、方策を自然な歩容に導くことで、学習速度と動作品質が大幅に向上します。
+
+## カリキュラム学習
+
+複雑な歩行は段階的に学習されることが多いです:
+
+1. **立位バランス**: 直立を維持する学習
+2. **平地歩行**: 基本的な前進移動
+3. **多様な地形**: 坂、階段、障害物
+4. **外部摂動**: 押し出しからの回復
+5. **アジャイル行動**: 走行、ジャンプ、旋回
+
+## 参考文献
+
+- X. Peng et al., "[DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based Character Skills](https://arxiv.org/abs/1804.02717)," *ACM TOG*, 2018.
+- Z. Xie et al., "[Feedback Control For Cassie With Deep Reinforcement Learning](https://arxiv.org/abs/1803.05580)," *Proc. IROS*, 2018.
+- J. Schulman et al., "[Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)," *arXiv*, 2017.
+
+<InteractiveDemo title="RL Training Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive RL training visualization with reward shaping demo coming soon.
+  </p>
+</InteractiveDemo>

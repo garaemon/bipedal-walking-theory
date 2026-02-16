@@ -1,0 +1,258 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { PreviewControlDiagram, CoMZMPSystemDiagram } from "@/components/diagrams/PreviewControlDiagram";
+
+# 歩行のためのプレビュー制御
+
+プレビュー制御は、将来の参照情報を利用して歩行パターンを生成する強力な手法です。2003年に梶田らによって二足歩行に導入され、現在も最も広く使用されている手法の一つです。
+
+## 重心-ZMPダイナミクスの状態空間モデル
+
+LIPMの方程式 $\ddot{x} = \frac{g}{z_c}(x - p_x)$ から出発し、ZMPを以下のように表現できます:
+
+$$
+p_x = x - \frac{z_c}{g}\ddot{x}
+$$
+
+最適制御を適用するために、**躍度** $u = \dddot{x}$ を制御入力として使用します。状態ベクトルを $\mathbf{x} = [x, \dot{x}, \ddot{x}]^T$ とすると、離散時間状態空間モデルが得られます:
+
+$$
+\mathbf{x}_{k+1} = A\mathbf{x}_k + Bu_k
+$$
+
+$$
+p_k = C\mathbf{x}_k
+$$
+
+ここで（サンプリング周期 $T$ として）:
+
+$$
+A = \begin{bmatrix} 1 & T & T^2/2 \\ 0 & 1 & T \\ 0 & 0 & 1 \end{bmatrix}, \quad
+B = \begin{bmatrix} T^3/6 \\ T^2/2 \\ T \end{bmatrix}, \quad
+C = \begin{bmatrix} 1 & 0 & -z_c/g \end{bmatrix}
+$$
+
+<CoMZMPSystemDiagram />
+
+## プレビュー制御理論
+
+鍵となるアイデアは、**将来の参照情報**を利用して追従性能を向上させることです。コントローラは将来の $N_L$ ステップ先まで参照します。
+
+<PreviewControlDiagram />
+
+### コスト関数
+
+プレビューコントローラは以下を最小化します:
+
+$$
+J = \sum_{i=k}^{\infty} \left[ Q_e e(i)^2 + R \Delta u(i)^2 \right]
+$$
+
+ここで $e(i) = p(i) - p^{ref}(i)$ はZMP追従誤差、$\Delta u(i) = u(i) - u(i-1)$ は制御増分です。
+
+増分型の定式化により、定常状態誤差がゼロになることが保証されます。
+
+### コントローラの構造
+
+最適プレビューコントローラは3つの成分から構成されます:
+
+<MathBlock tex="u(k) = -G_I \sum_{i=0}^{k} e(i) - G_x \mathbf{x}(k) - \sum_{j=1}^{N_L} G_p(j) \, p^{ref}(k+j)" />
+
+1. **積分項** $-G_I \sum e$: 定常状態誤差を除去
+2. **状態フィードバック** $-G_x \mathbf{x}$: システムを安定化
+3. **プレビュー動作** $-\sum G_p \cdot p^{ref}$: 将来の参照を先読み
+
+プレビューゲイン $G_p(j)$ はプレビューホライズン $j$ とともに減衰するため、近い将来の参照が遠い将来の参照よりも大きな影響を持ちます。
+
+## プレビューゲインの計算
+
+ゲインは**離散時間代数リカッチ方程式** (DARE) を解くことで得られます:
+
+$$
+P = A_e^T P A_e - A_e^T P B_e (R + B_e^T P B_e)^{-1} B_e^T P A_e + C_e^T Q_e C_e
+$$
+
+ここで $A_e$、$B_e$、$C_e$ は積分器の状態を含む拡大システム行列です。
+
+<CodeEditor
+  initialCode={`import math
+
+# Preview control gain computation (simplified)
+# Using the LIPM state-space model
+
+g = 9.81
+z_c = 0.8
+T = 0.01  # sampling period (s)
+N_preview = 160  # preview steps (1.6 seconds ahead)
+
+# State-space matrices
+A = [
+    [1, T, T**2/2],
+    [0, 1, T],
+    [0, 0, 1]
+]
+B = [T**3/6, T**2/2, T]
+C = [1, 0, -z_c/g]
+
+# Compute ZMP output: p = C * x
+def compute_zmp(x):
+    return C[0]*x[0] + C[1]*x[1] + C[2]*x[2]
+
+# Simple preview control simulation
+# (using pre-computed approximate gains for demonstration)
+Gi = 1200.0  # integral gain
+Gx = [8e5, 7e3, 30.0]  # state feedback gains
+
+# ZMP reference: step between left and right foot
+step_duration = 0.6  # seconds
+step_width = 0.04  # lateral step (m)
+
+print("=== Preview Control Walking Simulation ===")
+print(f"Preview horizon: {N_preview * T:.2f} s ({N_preview} steps)")
+print(f"Step duration: {step_duration} s")
+print()
+
+# State: [y, ydot, yddot] (lateral direction)
+x = [0.0, 0.0, 0.0]
+integral_error = 0.0
+sim_time = 3.0
+steps_sim = int(sim_time / T)
+
+print("Time(s)  CoM_y(mm)  ZMP_y(mm)  ZMP_ref(mm)")
+print("-" * 50)
+
+for k in range(steps_sim):
+    t = k * T
+    # ZMP reference (alternating between feet)
+    phase = int(t / step_duration)
+    zmp_ref = step_width if phase % 2 == 0 else -step_width
+
+    # Current ZMP
+    p = compute_zmp(x)
+
+    # Tracking error
+    e = p - zmp_ref
+    integral_error += e
+
+    # Control input (simplified - without full preview sum)
+    u = -Gi * integral_error * T
+    u -= Gx[0]*x[0] + Gx[1]*x[1] + Gx[2]*x[2]
+
+    # State update
+    x_new = [
+        A[0][0]*x[0] + A[0][1]*x[1] + A[0][2]*x[2] + B[0]*u,
+        A[1][0]*x[0] + A[1][1]*x[1] + A[1][2]*x[2] + B[1]*u,
+        A[2][0]*x[0] + A[2][1]*x[1] + A[2][2]*x[2] + B[2]*u,
+    ]
+    x = x_new
+
+    if k % 50 == 0:
+        print(f"{t:5.2f}    {x[0]*1000:8.2f}   {p*1000:8.2f}    {zmp_ref*1000:8.2f}")
+
+print()
+print("Note: Full preview control uses future ZMP reference")
+print("values for better anticipation and smoother tracking.")
+`}
+/>
+
+## 歩行パターン生成パイプライン
+
+ZMPベースの歩行のための完全なパイプライン:
+
+1. **足踏み計画**: 各ステップの位置とタイミングを定義
+2. **ZMP参照生成**: 支持多角形内に収まる区分定数ZMP軌道を作成
+3. **プレビュー制御**: ZMP参照を追従する重心軌道を計算
+4. **逆運動学**: 重心＋足軌道を関節角度に変換
+
+<CodeEditor
+  initialCode={`import math
+
+# Walking pattern generation with preview control
+g = 9.81
+z_c = 0.8
+omega = math.sqrt(g / z_c)
+T = 0.01
+
+# Footstep plan (x, y positions of each step)
+footsteps = [
+    (0.00, 0.05),   # left foot
+    (0.20, -0.05),  # right foot
+    (0.40, 0.05),   # left foot
+    (0.60, -0.05),  # right foot
+    (0.80, 0.05),   # left foot (final)
+]
+step_duration = 0.6  # seconds per step
+
+print("=== Footstep Plan ===")
+for i, (fx, fy) in enumerate(footsteps):
+    side = "L" if i % 2 == 0 else "R"
+    print(f"  Step {i} ({side}): x={fx:.2f}m, y={fy:+.2f}m")
+
+# Generate ZMP reference (sagittal direction)
+total_time = len(footsteps) * step_duration
+n_steps = int(total_time / T)
+
+print(f"\\nTotal walking time: {total_time:.1f} s")
+print(f"Simulation steps: {n_steps}")
+print()
+
+# ZMP reference for sagittal (x) direction
+zmp_ref_x = []
+for k in range(n_steps):
+    t = k * T
+    phase = min(int(t / step_duration), len(footsteps) - 1)
+    zmp_ref_x.append(footsteps[phase][0])
+
+# Simple forward simulation to show CoM tracking
+x = [0.0, 0.2, 0.0]  # [position, velocity, acceleration]
+C = [1, 0, -z_c/g]
+
+print("Time(s)  CoM_x(m)  ZMP(m)   ZMP_ref(m)  Error(mm)")
+print("-" * 55)
+
+integral_e = 0.0
+Gi, Gx0, Gx1, Gx2 = 800, 5e5, 5e3, 25
+
+for k in range(n_steps):
+    t = k * T
+    p = C[0]*x[0] + C[1]*x[1] + C[2]*x[2]
+    e = p - zmp_ref_x[k]
+    integral_e += e
+
+    u = -Gi*integral_e*T - Gx0*x[0] - Gx1*x[1] - Gx2*x[2]
+    x = [
+        x[0] + T*x[1] + T**2/2*x[2] + T**3/6*u,
+        x[1] + T*x[2] + T**2/2*u,
+        x[2] + T*u,
+    ]
+
+    if k % 60 == 0:
+        print(f"{t:5.2f}    {x[0]:7.4f}   {p:7.4f}   {zmp_ref_x[k]:7.4f}    {e*1000:+6.2f}")
+`}
+/>
+
+## 利点と限界
+
+**利点:**
+- 滑らかな重心軌道を生成
+- 解析的に導出された最適ゲイン
+- 計算効率が高い（ゲインはオフラインで計算）
+- 平坦地形の歩行に適している
+
+**限界:**
+- 線形モデルのみ（重心高さ一定）
+- 固定のプレビューホライズン
+- 大きな外乱にオンラインで対応できない
+- 事前に計画された足踏みを前提とする
+
+## 参考文献
+
+- S. Kajita et al., "[Biped Walking Pattern Generation by using Preview Control of Zero-Moment Point](https://doi.org/10.1109/ROBOT.2003.1241826)," *Proc. IEEE ICRA*, 2003.
+- T. Katayama et al., "[Design of an optimal controller for a discrete-time system subject to previewable demand](https://doi.org/10.1080/0020718508961156)," *Int. J. Control*, 1985.
+
+<InteractiveDemo title="Preview Control Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive preview control with adjustable preview window coming soon.
+  </p>
+</InteractiveDemo>

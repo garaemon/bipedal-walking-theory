@@ -1,0 +1,180 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { TaskPriorityDiagram } from "@/components/diagrams/WholeBodyControlDiagram";
+
+# 全身運動制御
+
+歩行ロボットは、バランスの維持、足の配置、姿勢の制御、関節限界の回避など、複数の目標を同時に達成するために協調させなければならない多くの自由度を持っています。
+
+## 順運動学
+
+関節角度 $\mathbf{q} \in \mathbb{R}^n$ が与えられたとき、順運動学写像はエンドエフェクタ（例: 足）の位置と姿勢を計算します:
+
+$$
+\mathbf{x} = f(\mathbf{q})
+$$
+
+ここで $\mathbf{x} \in \mathbb{R}^m$ はタスク空間の位置です（$m \leq n$）。
+
+## ヤコビアン
+
+**ヤコビアン** $\mathbf{J}$ は関節速度をタスク空間速度に関連付けます:
+
+$$
+\dot{\mathbf{x}} = \mathbf{J}(\mathbf{q})\dot{\mathbf{q}}
+$$
+
+ここで $\mathbf{J} = \frac{\partial f}{\partial \mathbf{q}} \in \mathbb{R}^{m \times n}$ です。
+
+ヒューマノイドロボットにおいて、ヤコビアンは関節速度を重心速度、足速度、手速度などに写像します。
+
+## 逆運動学
+
+所望のタスク空間速度 $\dot{\mathbf{x}}_{des}$ が与えられたとき、関節速度を求めます:
+
+$$
+\dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des}
+$$
+
+ここで $\mathbf{J}^{\dagger}$ はヤコビアンの擬似逆行列です。
+
+ロボットがタスク次元より多くの関節を持つ場合（$n > m$）、システムは**冗長**であり、擬似逆行列は最小ノルム解を与えます。
+
+### 零空間
+
+$\mathbf{J}$ の零空間は、タスク空間出力に影響を与えない運動を表します。副次的な目標を追加できます:
+
+$$
+\dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des} + (\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0
+$$
+
+ここで $\dot{\mathbf{q}}_0$ は副次タスクのための任意の関節速度であり、$(\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})$ により零空間に射影されます。
+
+## タスク優先度フレームワーク
+
+<TaskPriorityDiagram />
+
+ヒューマノイドロボットでは、複数のタスクが優先度順に編成されます:
+
+$$
+\dot{\mathbf{q}} = \dot{\mathbf{q}}_1 + N_1(\dot{\mathbf{q}}_2 + N_2(\dot{\mathbf{q}}_3 + \cdots))
+$$
+
+ここで $\dot{\mathbf{q}}_i = \mathbf{J}_i^{\dagger}(\dot{\mathbf{x}}_i - \mathbf{J}_i \dot{\mathbf{q}}_{i-1})$、$N_i = \mathbf{I} - \mathbf{J}_i^{\dagger}\mathbf{J}_i$ は零空間射影子です。
+
+高優先度のタスクは確実に達成され、低優先度のタスクは残りの自由度のみを使用します。
+
+<CodeEditor
+  initialCode={`import math
+
+# 2-link planar robot IK demonstration
+# (simplified whole-body control example)
+
+l1 = 0.4  # link 1 length (m)
+l2 = 0.35  # link 2 length (m)
+
+def forward_kinematics(q1, q2):
+    """Compute end-effector position from joint angles."""
+    x = l1 * math.cos(q1) + l2 * math.cos(q1 + q2)
+    y = l1 * math.sin(q1) + l2 * math.sin(q1 + q2)
+    return x, y
+
+def compute_jacobian(q1, q2):
+    """Compute 2x2 Jacobian."""
+    J11 = -l1 * math.sin(q1) - l2 * math.sin(q1 + q2)
+    J12 = -l2 * math.sin(q1 + q2)
+    J21 = l1 * math.cos(q1) + l2 * math.cos(q1 + q2)
+    J22 = l2 * math.cos(q1 + q2)
+    return J11, J12, J21, J22
+
+# Start configuration
+q1, q2 = math.pi/4, -math.pi/6
+x, y = forward_kinematics(q1, q2)
+print("=== 2-Link Robot Inverse Kinematics ===")
+print(f"Initial config: q1={math.degrees(q1):.1f} deg, q2={math.degrees(q2):.1f} deg")
+print(f"End-effector: ({x:.4f}, {y:.4f}) m")
+print()
+
+# Target position
+x_target, y_target = 0.5, 0.3
+print(f"Target: ({x_target:.3f}, {y_target:.3f}) m")
+print()
+
+# IK using Jacobian pseudoinverse (iterative)
+dt = 0.05
+gain = 2.0
+print("Iter  q1(deg)  q2(deg)  x(m)     y(m)     error(mm)")
+print("-" * 55)
+
+for i in range(20):
+    x, y = forward_kinematics(q1, q2)
+    ex, ey = x_target - x, y_target - y
+    error = math.sqrt(ex**2 + ey**2)
+
+    if i % 2 == 0:
+        print(f" {i:2d}   {math.degrees(q1):7.2f}  {math.degrees(q2):7.2f}  "
+              f"{x:7.4f}  {y:7.4f}  {error*1000:7.3f}")
+
+    if error < 0.001:
+        print(f"\\nConverged in {i} iterations!")
+        break
+
+    # Jacobian pseudoinverse (2x2 case = inverse)
+    J11, J12, J21, J22 = compute_jacobian(q1, q2)
+    det = J11 * J22 - J12 * J21
+
+    if abs(det) < 1e-6:
+        print("Near singularity!")
+        break
+
+    # Inverse of 2x2 Jacobian
+    dq1 = (J22 * ex - J12 * ey) / det * gain * dt
+    dq2 = (-J21 * ex + J11 * ey) / det * gain * dt
+
+    q1 += dq1
+    q2 += dq2
+`}
+/>
+
+## マルチタスク制御のための二次計画法
+
+現代の全身コントローラは問題を**QP**として定式化します:
+
+$$
+\min_{\dot{\mathbf{q}}} \sum_{i} w_i \|\mathbf{J}_i\dot{\mathbf{q}} - \dot{\mathbf{x}}_{i,des}\|^2
+$$
+
+制約条件:
+- 関節位置制限: $\mathbf{q}_{min} \leq \mathbf{q} + \dot{\mathbf{q}}dt \leq \mathbf{q}_{max}$
+- 関節速度制限: $|\dot{\mathbf{q}}| \leq \dot{\mathbf{q}}_{max}$
+- トルク制限: $|\boldsymbol{\tau}| \leq \boldsymbol{\tau}_{max}$
+
+このアプローチは、零空間法では扱えない不等式制約を処理できます。
+
+## 操作空間制御
+
+Khatibの操作空間定式化はタスク空間での力制御を可能にします:
+
+$$
+\mathbf{F} = \Lambda(\mathbf{q})\ddot{\mathbf{x}}_{des} + \boldsymbol{\mu}(\mathbf{q}, \dot{\mathbf{q}}) + \mathbf{p}(\mathbf{q})
+$$
+
+ここで $\Lambda = (J M^{-1} J^T)^{-1}$ は操作空間慣性行列、$\boldsymbol{\mu}$ はコリオリ/遠心力項、$\mathbf{p}$ は重力です。
+
+対応する関節トルクは:
+
+$$
+\boldsymbol{\tau} = \mathbf{J}^T \mathbf{F} + (\mathbf{I} - \mathbf{J}^T \bar{\mathbf{J}}^T)\boldsymbol{\tau}_0
+$$
+
+## 参考文献
+
+- O. Khatib, "[A Unified Approach for Motion and Force Control of Robot Manipulators: The Operational Space Formulation](https://khatib.stanford.edu/publications/pdfs/Khatib_1987_RA.pdf)," *IEEE J. Robotics and Automation*, 1987.
+- L. Sentis and O. Khatib, "[Synthesis of Whole-Body Behaviors through Hierarchical Control of Behavioral Primitives](https://khatib.stanford.edu/publications/pdfs/Sentis_2005_IJHR.pdf)," *Int. J. Humanoid Robotics*, 2005.
+
+<InteractiveDemo title="Robot Arm IK Demo">
+  <p className="text-sm text-gray-500">
+    Interactive robot arm IK with task priority visualization coming soon.
+  </p>
+</InteractiveDemo>
