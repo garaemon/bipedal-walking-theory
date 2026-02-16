@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { chapters } from "@/lib/chapters";
+import { AiDisclaimerEn } from "@/components/AiDisclaimer";
 
 const contentMap: Record<
   string,
@@ -72,6 +73,7 @@ export default async function ChapterPage({
   const { default: Content } = await loader();
   return (
     <article className="prose prose-gray mx-auto max-w-3xl">
+      <AiDisclaimerEn />
       <Content />
     </article>
   );
