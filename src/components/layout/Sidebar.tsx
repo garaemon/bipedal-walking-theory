@@ -3,9 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { chapters } from "@/lib/chapters";
+import { chaptersJa } from "@/lib/chapters-ja";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const isJa = pathname.startsWith("/ja");
+  const chapterList = isJa ? chaptersJa : chapters;
+  const basePath = isJa ? "/ja/chapters" : "/chapters";
 
   return (
     <aside className="w-64 shrink-0 border-r border-gray-200 bg-gray-50">
@@ -14,8 +18,8 @@ export function Sidebar() {
           Chapters
         </h2>
         <ul className="space-y-1">
-          {chapters.map((chapter, index) => {
-            const href = `/chapters/${chapter.slug}`;
+          {chapterList.map((chapter, index) => {
+            const href = `${basePath}/${chapter.slug}`;
             const isActive = pathname === href;
             return (
               <li key={chapter.slug}>

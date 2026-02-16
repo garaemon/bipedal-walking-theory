@@ -17,3 +17,15 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+article a {
+  color: rgb(37 99 235);
+  text-decoration: underline;
+  text-decoration-color: rgb(147 197 253);
+  text-underline-offset: 2px;
+}
+
+article a:hover {
+  color: rgb(29 78 216);
+  text-decoration-color: currentColor;
+}
