@@ -1,0 +1,38 @@
+{
+  "config": {
+    // Allow HTML tags (needed for JSX/MDX components)
+    "MD033": false,
+    // Line length - relaxed for MDX with math expressions
+    "MD013": {
+      "line_length": 300
+    },
+    // Allow duplicate headings in different sections
+    "MD024": {
+      "siblings_only": true
+    },
+    // Allow trailing punctuation in headings
+    "MD026": false,
+    // Disable first-line heading rule (MDX files start with imports)
+    "MD041": false,
+    // Allow bare URLs
+    "MD034": false,
+    // Disable blanks-around-headings (false positives from Python # comments in CodeEditor)
+    "MD022": false,
+    // Disable blanks-around-lists (false positives from JSX/math content)
+    "MD032": false,
+    // Disable no-space-in-emphasis (false positives from Python * operator)
+    "MD037": false,
+    // Disable reference links check (false positives from LaTeX [i][j] notation)
+    "MD052": false,
+    // Allow mixed strong styles (some MDX content uses underscores)
+    "MD050": false,
+    // Disable table column style (compact tables are intentional)
+    "MD060": false
+  },
+  "globs": [
+    "src/content/**/*.mdx"
+  ],
+  "ignores": [
+    "node_modules"
+  ]
+}

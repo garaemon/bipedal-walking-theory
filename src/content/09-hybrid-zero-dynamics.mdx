@@ -1,0 +1,257 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { VirtualConstraintDiagram } from "@/components/diagrams/HZDDiagram";
+
+# Hybrid Zero Dynamics
+
+Hybrid Zero Dynamics (HZD) provides a rigorous mathematical framework for
+designing provably stable walking gaits. Unlike heuristic approaches, HZD
+guarantees orbital stability through carefully designed virtual constraints.
+
+## Virtual Constraints
+
+Virtual constraints are holonomic constraints enforced through feedback
+control rather than physical mechanisms. They parameterize joint motions
+as functions of a single **phase variable** $\theta(\mathbf{q})$:
+
+$$
+y = h(\mathbf{q}) - h_d(\theta(\mathbf{q}))
+$$
+
+where $h(\mathbf{q})$ selects the controlled outputs and $h_d(\theta)$
+defines the desired output as a function of the phase variable.
+
+<VirtualConstraintDiagram />
+
+### Phase Variable
+
+The phase variable $\theta(\mathbf{q})$ must be:
+- **Monotonically increasing** during the step (acts as a clock)
+- **Configuration dependent** (not time-based, making the gait robust)
+
+A common choice: the angle of the stance leg (hip angle relative to vertical).
+
+### Bezier Polynomial Parameterization
+
+The desired outputs are typically parameterized using Bezier polynomials:
+
+$$
+h_d(\theta) = \sum_{k=0}^{M} \alpha_k \binom{M}{k} s^k (1-s)^{M-k}
+$$
+
+where $s = \frac{\theta - \theta^+}{\theta^- - \theta^+} \in [0, 1]$
+normalizes the phase, and $\alpha_k$ are the Bezier coefficients to be optimized.
+
+## Hybrid System Model
+
+Walking is modeled as a hybrid system with:
+
+### Continuous Phase (Swing)
+
+$$
+\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}
+$$
+
+where $\mathbf{x} = [\mathbf{q}^T, \dot{\mathbf{q}}^T]^T$ is the full state.
+
+### Discrete Phase (Impact)
+
+At heel strike (when the switching surface $S$ is reached):
+
+$$
+\mathbf{x}^+ = \Delta(\mathbf{x}^-)
+$$
+
+The impact map $\Delta$ captures the instantaneous velocity change and
+leg relabeling at ground contact.
+
+## Zero Dynamics
+
+When the virtual constraints are perfectly enforced ($y = 0, \dot{y} = 0$),
+the system evolves on a lower-dimensional **zero dynamics surface**.
+
+The zero dynamics describe the remaining uncontrolled degree of freedom
+(typically the stance leg angle). They take the form:
+
+$$
+\ddot{\theta} = \kappa(\theta, \dot{\theta})
+$$
+
+This is a second-order system that completely determines the walking behavior
+when virtual constraints are satisfied.
+
+## Stability Analysis
+
+The gait is stable if the **hybrid zero dynamics** has a stable periodic orbit.
+
+### Poincare Map on Zero Dynamics
+
+Since the zero dynamics are 2D (with states $\theta, \dot{\theta}$), the
+Poincare map reduces to a scalar map:
+
+$$
+\dot{\theta}_{n+1}^+ = \rho(\dot{\theta}_n^+)
+$$
+
+The fixed point $\dot{\theta}^*$ satisfying $\dot{\theta}^* = \rho(\dot{\theta}^*)$
+is stable if $|\rho'(\dot{\theta}^*)| < 1$.
+
+<CodeEditor
+  initialCode={`import math
+
+# HZD gait design for a simple 2-link planar biped
+# Demonstrating Bezier polynomial virtual constraints
+
+def evaluate_bezier(alpha, s):
+    """Evaluate Bezier polynomial at normalized phase s."""
+    M = len(alpha) - 1
+    result = 0.0
+    for k in range(M + 1):
+        # Binomial coefficient
+        binom = math.factorial(M) // (math.factorial(k) * math.factorial(M - k))
+        result += alpha[k] * binom * s**k * (1 - s)**(M - k)
+    return result
+
+def evaluate_bezier_derivative(alpha, s):
+    """Evaluate derivative of Bezier polynomial."""
+    M = len(alpha) - 1
+    if M == 0:
+        return 0.0
+    # Derivative coefficients
+    d_alpha = [M * (alpha[k+1] - alpha[k]) for k in range(M)]
+    return evaluate_bezier(d_alpha, s)
+
+# Bezier coefficients for hip angle trajectory
+# These would normally be found via optimization
+alpha_hip = [0.3, 0.25, 0.1, -0.1, -0.25, -0.3]
+
+# Phase range
+theta_plus = -0.2   # phase at start of step
+theta_minus = 0.2   # phase at end of step
+
+print("=== Virtual Constraint (Hip Angle) ===")
+print(f"Bezier order: {len(alpha_hip) - 1}")
+print(f"Coefficients: {alpha_hip}")
+print(f"Phase range: [{theta_plus:.2f}, {theta_minus:.2f}]")
+print()
+
+print("Phase(s)  Desired_hip(deg)  Velocity(deg/s)")
+print("-" * 48)
+
+for i in range(11):
+    s = i / 10.0
+    theta = theta_plus + s * (theta_minus - theta_plus)
+
+    hip_desired = evaluate_bezier(alpha_hip, s)
+    hip_velocity = evaluate_bezier_derivative(alpha_hip, s)
+    hip_velocity /= (theta_minus - theta_plus)  # chain rule
+
+    print(f"  {s:.1f}      {math.degrees(hip_desired):8.2f}         "
+          f"{math.degrees(hip_velocity):8.2f}")
+
+print()
+print("The hip angle smoothly transitions from")
+print(f"  {math.degrees(evaluate_bezier(alpha_hip, 0)):.1f} deg (start)")
+print(f"  to {math.degrees(evaluate_bezier(alpha_hip, 1)):.1f} deg (end)")
+`}
+/>
+
+## Gait Optimization
+
+Finding good Bezier coefficients $\alpha$ requires optimization:
+
+$$
+\min_{\alpha} J(\alpha) \quad \text{s.t. stability and physical constraints}
+$$
+
+The cost $J$ typically includes:
+- Walking speed
+- Energy consumption (torque squared)
+- Ground clearance
+- Impact forces
+
+Constraints include:
+- Fixed-point stability: $|\rho'(\dot{\theta}^*)| < 1$
+- Foot clearance: swing foot stays above ground
+- Friction cone: no slipping
+- Torque limits
+
+<CodeEditor
+  initialCode={`import math
+
+# Simplified HZD stability analysis
+# Using a scalar Poincare return map
+
+def compute_poincare_map(theta_dot_plus, alpha_hip, step_length=0.3):
+    """Simplified return map for zero dynamics."""
+    # Energy-based approximation
+    # In the full model, this involves integrating the zero dynamics
+    g = 9.81
+    l = 0.8  # leg length
+
+    # Approximate energy gain/loss during step
+    energy_in = theta_dot_plus**2
+    # Impact energy loss (simplified model)
+    impact_ratio = math.cos(2 * math.asin(step_length / (2 * l)))
+
+    energy_out = energy_in * impact_ratio**2
+    # Add gravity contribution
+    energy_out += 2 * g / l * (1 - math.cos(math.asin(step_length / (2 * l))))
+
+    if energy_out < 0:
+        return 0.0
+    return math.sqrt(energy_out)
+
+# Find fixed point
+print("=== Poincare Map Analysis ===")
+print()
+
+# Iterate to find fixed point
+theta_dot = 1.5  # initial guess
+print("Iteration  theta_dot_in  theta_dot_out  Converged?")
+print("-" * 52)
+
+for i in range(15):
+    theta_dot_out = compute_poincare_map(theta_dot)
+    error = abs(theta_dot_out - theta_dot)
+    converged = "YES" if error < 0.001 else ""
+    print(f"    {i:2d}        {theta_dot:8.4f}      {theta_dot_out:8.4f}     {converged}")
+
+    if error < 0.001:
+        print(f"\\nFixed point: theta_dot* = {theta_dot:.4f} rad/s")
+        break
+    theta_dot = theta_dot_out
+
+# Check stability (numerical derivative)
+eps = 0.001
+rho_prime = (compute_poincare_map(theta_dot + eps) -
+             compute_poincare_map(theta_dot - eps)) / (2 * eps)
+
+print(f"Poincare map derivative: |rho'| = {abs(rho_prime):.4f}")
+if abs(rho_prime) < 1:
+    print("Gait is LOCALLY STABLE")
+else:
+    print("Gait is UNSTABLE")
+`}
+/>
+
+## Advantages of HZD
+
+1. **Provable stability**: rigorous Poincare analysis guarantees stability
+2. **Time-independent**: phase-based parameterization handles speed variations
+3. **Low-dimensional analysis**: zero dynamics reduce the stability problem
+4. **Optimization-friendly**: Bezier coefficients are smooth optimization variables
+5. **Hardware validated**: successfully demonstrated on Cassie, Digit, MABEL
+
+## References
+
+- E. Westervelt et al., "[Hybrid zero dynamics of planar biped walkers](https://doi.org/10.1109/TAC.2003.814636)," *IEEE Trans. Automatic Control*, 2003.
+- A. Ames et al., "[Human-Inspired Control of Bipedal Walking Robots](https://doi.org/10.1109/TAC.2014.2299342)," *IEEE Trans. Automatic Control*, 2014.
+- J. Grizzle et al., "[MABEL, A New Robotic Bipedal Walker and Runner](https://doi.org/10.1109/ACC.2009.5160550)," *Proc. ACC*, 2009.
+
+<InteractiveDemo title="Virtual Constraint Design">
+  <p className="text-sm text-gray-500">
+    Interactive virtual constraint design with Bezier polynomial editor coming soon.
+  </p>
+</InteractiveDemo>

@@ -1,0 +1,245 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { VirtualConstraintDiagram } from "@/components/diagrams/HZDDiagram";
+
+# ハイブリッドゼロダイナミクス
+
+ハイブリッドゼロダイナミクス (HZD) は、証明可能な安定歩行を設計するための厳密な数学的枠組みを提供します。ヒューリスティックな手法とは異なり、HZDは慎重に設計された仮想制約を通じて軌道安定性を保証します。
+
+## 仮想制約
+
+仮想制約とは、物理的な機構ではなくフィードバック制御によって実現されるホロノミック制約です。関節運動を単一の**位相変数** $\theta(\mathbf{q})$ の関数としてパラメータ化します:
+
+$$
+y = h(\mathbf{q}) - h_d(\theta(\mathbf{q}))
+$$
+
+ここで $h(\mathbf{q})$ は制御出力を選択し、$h_d(\theta)$ は位相変数の関数として望ましい出力を定義します。
+
+<VirtualConstraintDiagram />
+
+### 位相変数
+
+位相変数 $\theta(\mathbf{q})$ は以下の条件を満たす必要があります:
+- **単調増加**: 歩行ステップ中に増加し続ける（時計の役割を果たす）
+- **姿勢依存**: 時間ベースではない（歩容のロバスト性を高める）
+
+一般的な選択: 支持脚の角度（垂直方向に対する股関節角度）。
+
+### ベジエ多項式パラメータ化
+
+望ましい出力は通常、ベジエ多項式を用いてパラメータ化されます:
+
+$$
+h_d(\theta) = \sum_{k=0}^{M} \alpha_k \binom{M}{k} s^k (1-s)^{M-k}
+$$
+
+ここで $s = \frac{\theta - \theta^+}{\theta^- - \theta^+} \in [0, 1]$ は位相を正規化し、$\alpha_k$ は最適化されるベジエ係数です。
+
+## ハイブリッドシステムモデル
+
+歩行は以下の要素を持つハイブリッドシステムとしてモデル化されます:
+
+### 連続相 (遊脚期)
+
+$$
+\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}
+$$
+
+ここで $\mathbf{x} = [\mathbf{q}^T, \dot{\mathbf{q}}^T]^T$ は完全状態です。
+
+### 離散相 (衝撃)
+
+踵接地時（切り替え面 $S$ に到達した時）:
+
+$$
+\mathbf{x}^+ = \Delta(\mathbf{x}^-)
+$$
+
+衝撃写像 $\Delta$ は、地面接触時の瞬間的な速度変化と脚のラベル付け替えを表します。
+
+## ゼロダイナミクス
+
+仮想制約が完全に実現されている場合 ($y = 0, \dot{y} = 0$)、システムは低次元の**ゼロダイナミクス面**上で発展します。
+
+ゼロダイナミクスは、残りの非制御自由度（通常は支持脚の角度）を記述します。以下の形式を取ります:
+
+$$
+\ddot{\theta} = \kappa(\theta, \dot{\theta})
+$$
+
+これは仮想制約が満たされたときの歩行挙動を完全に決定する2階システムです。
+
+## 安定性解析
+
+歩容は**ハイブリッドゼロダイナミクス**が安定な周期軌道を持つ場合に安定です。
+
+### ゼロダイナミクス上のポアンカレ写像
+
+ゼロダイナミクスは2次元（状態 $\theta, \dot{\theta}$）であるため、ポアンカレ写像はスカラー写像に帰着されます:
+
+$$
+\dot{\theta}_{n+1}^+ = \rho(\dot{\theta}_n^+)
+$$
+
+$\dot{\theta}^* = \rho(\dot{\theta}^*)$ を満たす不動点 $\dot{\theta}^*$ は、$|\rho'(\dot{\theta}^*)| < 1$ のとき安定です。
+
+<CodeEditor
+  initialCode={`import math
+
+# HZD gait design for a simple 2-link planar biped
+# Demonstrating Bezier polynomial virtual constraints
+
+def evaluate_bezier(alpha, s):
+    """Evaluate Bezier polynomial at normalized phase s."""
+    M = len(alpha) - 1
+    result = 0.0
+    for k in range(M + 1):
+        # Binomial coefficient
+        binom = math.factorial(M) // (math.factorial(k) * math.factorial(M - k))
+        result += alpha[k] * binom * s**k * (1 - s)**(M - k)
+    return result
+
+def evaluate_bezier_derivative(alpha, s):
+    """Evaluate derivative of Bezier polynomial."""
+    M = len(alpha) - 1
+    if M == 0:
+        return 0.0
+    # Derivative coefficients
+    d_alpha = [M * (alpha[k+1] - alpha[k]) for k in range(M)]
+    return evaluate_bezier(d_alpha, s)
+
+# Bezier coefficients for hip angle trajectory
+# These would normally be found via optimization
+alpha_hip = [0.3, 0.25, 0.1, -0.1, -0.25, -0.3]
+
+# Phase range
+theta_plus = -0.2   # phase at start of step
+theta_minus = 0.2   # phase at end of step
+
+print("=== Virtual Constraint (Hip Angle) ===")
+print(f"Bezier order: {len(alpha_hip) - 1}")
+print(f"Coefficients: {alpha_hip}")
+print(f"Phase range: [{theta_plus:.2f}, {theta_minus:.2f}]")
+print()
+
+print("Phase(s)  Desired_hip(deg)  Velocity(deg/s)")
+print("-" * 48)
+
+for i in range(11):
+    s = i / 10.0
+    theta = theta_plus + s * (theta_minus - theta_plus)
+
+    hip_desired = evaluate_bezier(alpha_hip, s)
+    hip_velocity = evaluate_bezier_derivative(alpha_hip, s)
+    hip_velocity /= (theta_minus - theta_plus)  # chain rule
+
+    print(f"  {s:.1f}      {math.degrees(hip_desired):8.2f}         "
+          f"{math.degrees(hip_velocity):8.2f}")
+
+print()
+print("The hip angle smoothly transitions from")
+print(f"  {math.degrees(evaluate_bezier(alpha_hip, 0)):.1f} deg (start)")
+print(f"  to {math.degrees(evaluate_bezier(alpha_hip, 1)):.1f} deg (end)")
+`}
+/>
+
+## 歩容最適化
+
+良いベジエ係数 $\alpha$ を見つけるには最適化が必要です:
+
+$$
+\min_{\alpha} J(\alpha) \quad \text{s.t. stability and physical constraints}
+$$
+
+コスト $J$ には通常以下が含まれます:
+- 歩行速度
+- エネルギー消費（トルクの二乗）
+- 足のクリアランス
+- 衝撃力
+
+制約条件には以下が含まれます:
+- 不動点安定性: $|\rho'(\dot{\theta}^*)| < 1$
+- 足のクリアランス: 遊脚が地面より上にあること
+- 摩擦錐: 滑りがないこと
+- トルク制限
+
+<CodeEditor
+  initialCode={`import math
+
+# Simplified HZD stability analysis
+# Using a scalar Poincare return map
+
+def compute_poincare_map(theta_dot_plus, alpha_hip, step_length=0.3):
+    """Simplified return map for zero dynamics."""
+    # Energy-based approximation
+    # In the full model, this involves integrating the zero dynamics
+    g = 9.81
+    l = 0.8  # leg length
+
+    # Approximate energy gain/loss during step
+    energy_in = theta_dot_plus**2
+    # Impact energy loss (simplified model)
+    impact_ratio = math.cos(2 * math.asin(step_length / (2 * l)))
+
+    energy_out = energy_in * impact_ratio**2
+    # Add gravity contribution
+    energy_out += 2 * g / l * (1 - math.cos(math.asin(step_length / (2 * l))))
+
+    if energy_out < 0:
+        return 0.0
+    return math.sqrt(energy_out)
+
+# Find fixed point
+print("=== Poincare Map Analysis ===")
+print()
+
+# Iterate to find fixed point
+theta_dot = 1.5  # initial guess
+print("Iteration  theta_dot_in  theta_dot_out  Converged?")
+print("-" * 52)
+
+for i in range(15):
+    theta_dot_out = compute_poincare_map(theta_dot)
+    error = abs(theta_dot_out - theta_dot)
+    converged = "YES" if error < 0.001 else ""
+    print(f"    {i:2d}        {theta_dot:8.4f}      {theta_dot_out:8.4f}     {converged}")
+
+    if error < 0.001:
+        print(f"\\nFixed point: theta_dot* = {theta_dot:.4f} rad/s")
+        break
+    theta_dot = theta_dot_out
+
+# Check stability (numerical derivative)
+eps = 0.001
+rho_prime = (compute_poincare_map(theta_dot + eps) -
+             compute_poincare_map(theta_dot - eps)) / (2 * eps)
+
+print(f"Poincare map derivative: |rho'| = {abs(rho_prime):.4f}")
+if abs(rho_prime) < 1:
+    print("Gait is LOCALLY STABLE")
+else:
+    print("Gait is UNSTABLE")
+`}
+/>
+
+## HZDの利点
+
+1. **証明可能な安定性**: 厳密なポアンカレ解析により安定性を保証
+2. **時間非依存**: 位相ベースのパラメータ化が速度変動に対応
+3. **低次元解析**: ゼロダイナミクスにより安定性問題を低次元化
+4. **最適化に適している**: ベジエ係数は滑らかな最適化変数
+5. **実機で検証済み**: Cassie、Digit、MABELで実証成功
+
+## 参考文献
+
+- E. Westervelt et al., "[Hybrid zero dynamics of planar biped walkers](https://doi.org/10.1109/TAC.2003.814636)," *IEEE Trans. Automatic Control*, 2003.
+- A. Ames et al., "[Human-Inspired Control of Bipedal Walking Robots](https://doi.org/10.1109/TAC.2014.2299342)," *IEEE Trans. Automatic Control*, 2014.
+- J. Grizzle et al., "[MABEL, A New Robotic Bipedal Walker and Runner](https://doi.org/10.1109/ACC.2009.5160550)," *Proc. ACC*, 2009.
+
+<InteractiveDemo title="Virtual Constraint Design">
+  <p className="text-sm text-gray-500">
+    Interactive virtual constraint design with Bezier polynomial editor coming soon.
+  </p>
+</InteractiveDemo>

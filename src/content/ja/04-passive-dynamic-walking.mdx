@@ -1,0 +1,255 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { PassiveWalkerDiagram, PoincareDiagram } from "@/components/diagrams/PassiveWalkerDiagram";
+
+# 受動歩行
+
+受動歩行は、二足歩行が必ずしも能動的な制御を必要としないことを示します。
+1990年にTad McGeerによって開拓された受動歩行器は、重力と力学的ダイナミクスを利用して、
+モーターやコントローラーなしで緩い斜面を歩きます。
+
+## McGeerの受動歩行機
+
+McGeerは、単純な二脚機構が重力のみを使って安定して斜面を歩行できることを示しました。
+重要な知見: **歩行は本質的に制御された転倒の過程である**。
+
+最小限の受動歩行器は以下で構成されます:
+- 股関節で接続された2本の剛体脚
+- 点状の足（または安定性のための湾曲した足）
+- 重力エネルギーを供給する緩い斜面
+
+<PassiveWalkerDiagram />
+
+## ハイブリッド力学系
+
+受動歩行は**ハイブリッド力学系**です。以下の要素を組み合わせます:
+
+1. **連続力学**（遊脚期）: 微分方程式により支配される
+2. **離散イベント**（踵接地）: 瞬間的な速度変化
+
+### 遊脚期の力学
+
+脚長 $l$、股関節質量 $M$、足部質量 $m$ の平面コンパスゲート歩行器について、
+傾斜角 $\gamma$ の斜面上での遊脚期の力学は:
+
+$$
+M_{\theta}(\theta)\ddot{\theta} + C_{\theta}(\theta, \dot{\theta})\dot{\theta} + G_{\theta}(\theta) = 0
+$$
+
+ここで、$\theta = [\theta_{st}, \theta_{sw}]^T$ は支持脚と遊脚の角度です。
+
+最も単純な歩行器（股関節と足に質点がある場合）では:
+
+$$
+\ddot{\theta}_{st} = \sin(\theta_{st} - \gamma)
+$$
+
+$$
+\ddot{\theta}_{sw} = \ddot{\theta}_{st} + \dot{\theta}_{st}^2 \sin(\theta_{sw}) - \cos(\theta_{st} - \gamma)\sin(\theta_{sw})
+$$
+
+（角度は斜面法線から測定、$g/l$ で正規化。）
+
+### 踵接地 (衝撃マップ)
+
+踵接地時に、衝撃点まわりの角運動量が保存されます。
+これにより、衝撃前から衝撃後の速度への離散写像が得られます:
+
+$$
+\dot{\theta}^+ = H(\theta^-)\dot{\theta}^-
+$$
+
+ここで、$H$ は衝撃遷移行列です:
+
+$$
+H = \begin{bmatrix} \cos(2\alpha) & 0 \\ \cos(2\alpha)(1 - \cos(2\alpha)) & 0 \end{bmatrix}
+$$
+
+衝撃時の脚間角度が $2\alpha$ の対称歩行器の場合。
+
+## リミットサイクル
+
+安定な受動歩行は**リミットサイクル**に対応します。
+リミットサイクルとは、近傍の軌道が収束する状態空間中の周期軌道です。
+
+### 位相面
+
+踵接地時の歩行器の状態は、支持脚角度 $\theta$ と角速度 $\dot{\theta}$ で記述できます。
+安定な歩行パターンは $(\theta, \dot{\theta})$ 位相面上の閉軌道として現れます。
+
+<PoincareDiagram />
+
+## ポアンカレ写像解析
+
+安定性を解析するために、**ポアンカレ写像** $P$ を使用します。
+これはある踵接地から次の踵接地への離散時間写像です。
+
+$$
+\mathbf{x}_{n+1} = P(\mathbf{x}_n)
+$$
+
+ここで、$\mathbf{x}_n$ は $n$ 回目の踵接地時の状態です。
+
+### 不動点と安定性
+
+周期歩行はポアンカレ写像の**不動点** $\mathbf{x}^*$ です:
+
+$$
+\mathbf{x}^* = P(\mathbf{x}^*)
+$$
+
+ヤコビアン $\frac{\partial P}{\partial \mathbf{x}}\big|_{\mathbf{x}^*}$ の
+すべての固有値の絶対値が1未満であれば、歩行は局所的に安定です。
+
+## Python シミュレーション: 最も単純な歩行器
+
+<CodeEditor
+  initialCode={`import math
+
+# Simplest passive walker simulation
+# (rimless wheel model as a starting point)
+
+# Parameters
+g = 9.81       # gravity (m/s^2)
+l = 1.0        # leg length (m)
+gamma = 0.05   # slope angle (radians, about 3 degrees)
+n_spokes = 5   # number of legs (rimless wheel)
+alpha = math.pi / n_spokes  # half inter-leg angle
+
+print("=== Rimless Wheel on Slope ===")
+print(f"Slope angle: {math.degrees(gamma):.1f} degrees")
+print(f"Number of spokes: {n_spokes}")
+print(f"Half inter-leg angle: {math.degrees(alpha):.1f} degrees")
+print()
+
+# Heel strike collision: angular velocity ratio
+# omega_plus / omega_minus = cos(2*alpha)
+collision_ratio = math.cos(2 * alpha)
+print(f"Collision velocity ratio: {collision_ratio:.4f}")
+
+# Energy balance for steady-state rolling
+# Energy gained from gravity per step = Energy lost at collision
+# Steady-state angular velocity before collision:
+omega_minus_sq = 2 * g / l * (1 - math.cos(2 * alpha * math.sin(gamma) / math.sin(2 * alpha)))
+
+# Simplified for small gamma:
+omega_steady = math.sqrt(2 * g * math.sin(gamma) * math.tan(alpha) / (l * (1 - collision_ratio**2)))
+
+print(f"Steady-state angular velocity: {omega_steady:.4f} rad/s")
+print()
+
+# Simulate multiple steps
+omega = omega_steady * 0.8  # start slightly slower
+print("Step  omega_before  omega_after   Steady?")
+print("-" * 48)
+
+for step in range(10):
+    # Swing phase: energy conservation on slope
+    # omega_end^2 = omega_start^2 + 2*(g/l)*(cos(theta_end) - cos(theta_start))
+    # For small angles, gain from slope:
+    energy_gain = 2 * (g / l) * math.sin(gamma) * math.sin(2 * alpha)
+    omega_before_strike = math.sqrt(omega**2 + energy_gain)
+
+    # Heel strike
+    omega_after_strike = collision_ratio * omega_before_strike
+
+    converged = "~" if abs(omega_after_strike - omega_steady * collision_ratio) < 0.01 else " "
+    print(f"  {step:2d}     {omega_before_strike:8.4f}      {omega_after_strike:8.4f}     {converged}")
+
+    omega = omega_after_strike
+`}
+/>
+
+## エネルギー効率
+
+受動歩行器は、能動制御されたロボットと比較して驚くほどエネルギー効率が高いです。
+**輸送コスト** (CoT) はエネルギー効率を測定します:
+
+$$
+CoT = \frac{E_{input}}{m g d}
+$$
+
+ここで、$E_{input}$ は消費エネルギー、$m$ は質量、$g$ は重力、$d$ は移動距離です。
+
+| 歩行器の種類 | 輸送コスト |
+|-------------|-----------|
+| 受動歩行器 | ~0.05 |
+| 人間の歩行 | ~0.20 |
+| Honda ASIMO | ~3.2 |
+| Boston Dynamics Atlas | ~2.0 |
+
+受動歩行器が人間に近い効率を達成できるのは、自然な力学に逆らうのではなく、
+それを活用しているからです。
+
+## 分岐とカオス
+
+斜面角度 $\gamma$ が増加すると:
+
+1. **小さな $\gamma$**: 安定な周期1歩行（1サイクルに1歩）
+2. **中程度の $\gamma$**: 周期倍分岐（周期2、周期4、...）
+3. **大きな $\gamma$**: カオス的歩行、その後転倒
+
+この豊かな力学的振る舞いは、二足歩行を非線形力学とカオス理論に結びつけます。
+
+<CodeEditor
+  initialCode={`import math
+
+# Demonstrate period-doubling concept
+# Using a simple logistic-map analogy for the Poincare map
+
+print("=== Bifurcation Behavior ===")
+print()
+print("As slope increases, the gait transitions:")
+print("  Period-1 -> Period-2 -> Period-4 -> Chaos -> Falling")
+print()
+
+# Simplified model: map x_{n+1} = r * x_n * (1 - x_n)
+# r increases with slope angle
+slopes = [
+    (0.02, 2.8, "Period-1 (stable)"),
+    (0.04, 3.2, "Period-2"),
+    (0.06, 3.5, "Period-4"),
+    (0.08, 3.9, "Chaos"),
+]
+
+for gamma_deg, r, label in slopes:
+    x = 0.5
+    # Run for 50 iterations to settle
+    for _ in range(50):
+        x = r * x * (1 - x)
+    # Collect next 8 iterations
+    values = []
+    for _ in range(8):
+        x = r * x * (1 - x)
+        values.append(x)
+
+    unique = sorted(set(round(v, 4) for v in values))
+    print(f"Slope {gamma_deg:.2f} rad: {label}")
+    print(f"  Distinct states: {len(unique)}")
+    print(f"  Values: {[f'{v:.4f}' for v in unique[:4]]}")
+    print()
+`}
+/>
+
+## 受動歩行から能動歩行へ
+
+受動歩行は能動歩行器の設計に関する知見を提供します:
+
+1. **自然な力学の活用**: ロボットの自然な運動に逆らうのではなく、それと協調する制御器を設計する
+2. **最小限のアクチュエーション**: すべての関節を制御するのではなく、適切なタイミングで少量のエネルギーを加える（例: 足首の蹴り出し）
+3. **リミットサイクル安定性**: 安定な周期軌道として歩行パターンを設計する
+
+これらの原則は、CornellのRangerやDelftのFlameなどの効率的な歩行ロボットの開発に影響を与えました。
+
+## 参考文献
+
+- T. McGeer, "[Passive Dynamic Walking](https://doi.org/10.1177/027836499000900206)," *Int. J. Robotics Research*, 1990.
+- A. Goswami et al., "[Limit Cycles in a Passive Compass Gait Biped and Passivity-Mimicking Control Laws](https://doi.org/10.1023/A:1008844026298)," *Autonomous Robots*, 1997.
+- S. Collins et al., "[Efficient Bipedal Robots Based on Passive-Dynamic Walkers](https://doi.org/10.1126/science.1107799)," *Science*, 2005.
+
+<InteractiveDemo title="Passive Walker Simulation">
+  <p className="text-sm text-gray-500">
+    Interactive passive walker on adjustable slope coming soon.
+  </p>
+</InteractiveDemo>

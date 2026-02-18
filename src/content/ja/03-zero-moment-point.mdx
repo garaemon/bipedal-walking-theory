@@ -1,0 +1,193 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { ZMPConceptDiagram, ZMPSupportPolygonDiagram } from "@/components/diagrams/ZMPDiagram";
+
+# ゼロモーメントポイント (ZMP)
+
+ゼロモーメントポイントは、二足歩行における動的バランスの基準を提供する基礎的な概念です。
+1969年にVukobratovicとJuricicによって提唱されたZMP理論は、
+数十年にわたりほとんどのヒューマノイド歩行制御器の基礎となってきました。
+
+## 定義
+
+**ゼロモーメントポイント**は、すべての活性力（重力と慣性力）の合モーメントの
+水平成分がゼロとなる地面上の点です。
+
+$n$ 個の質点からなるシステムにおいて、ZMPの位置は:
+
+<MathBlock tex="p_x^{zmp} = \frac{\sum_{i=1}^{n} m_i (\ddot{z}_i + g) x_i - \sum_{i=1}^{n} m_i \ddot{x}_i z_i}{\sum_{i=1}^{n} m_i (\ddot{z}_i + g)}" />
+
+<MathBlock tex="p_y^{zmp} = \frac{\sum_{i=1}^{n} m_i (\ddot{z}_i + g) y_i - \sum_{i=1}^{n} m_i \ddot{y}_i z_i}{\sum_{i=1}^{n} m_i (\ddot{z}_i + g)}" />
+
+<ZMPConceptDiagram />
+
+## 物理的意味
+
+ZMPは**圧力中心 (CoP)** と等価です。CoPとは地面反力が実効的に作用する点であり、
+ロボットが地面と安定した接触状態にある限り、ZMPとCoPは一致します。
+
+位置 $(x, y, z)$ にある単一質点を考えます。ZMPは次のように簡略化されます:
+
+$$
+p_x^{zmp} = x - \frac{z \ddot{x}}{\ddot{z} + g}
+$$
+
+$z = z_c$（一定）かつ $\ddot{z} = 0$ のLIPMの場合:
+
+$$
+p_x^{zmp} = x - \frac{z_c}{g}\ddot{x}
+$$
+
+これはLIPM方程式 $\ddot{x} = \frac{g}{z_c}(x - p_x)$ における支持点 $p_x$ と完全に一致します。
+
+## 支持多角形
+
+**支持多角形**は、ロボットと地面の間のすべての接触点の凸包です。
+
+- **単脚支持**: 支持多角形は支持脚の足跡
+- **両脚支持**: 支持多角形は両足を含む
+
+<ZMPSupportPolygonDiagram />
+
+### ZMP安定性基準
+
+ロボットが動的バランスを維持するための必要十分条件:
+
+> ZMPが支持多角形の内部にあること。
+
+ZMPが支持多角形の端に達すると、ロボットは転倒し始めます。
+これは歩行パターン生成で使用される基本的な拘束条件です。
+
+## ZMP vs CoP vs CoG
+
+| 概念 | 定義 | 用途 |
+|------|------|------|
+| **CoG** (重心) | すべての質量の重み付き平均位置 | 静的バランス |
+| **CoP** (圧力中心) | 地面反力が作用する点 | 測定可能な量 |
+| **ZMP** (ゼロモーメントポイント) | 水平モーメントが消える点 | 動的バランス基準 |
+
+ロボットが安定した地面接触状態にある場合、ZMP = CoPです。計算されたZMPが
+支持多角形の外に出ると、実際のCoPは多角形の端に留まり、ロボットは傾きます。
+
+## 運動データからのZMP計算
+
+重心の軌道が与えられた場合、ZMPを計算できます:
+
+<CodeEditor
+  initialCode={`import math
+
+# Simulate a simple CoM trajectory and compute ZMP
+# Using a sinusoidal CoM motion
+g = 9.81
+z_c = 0.8  # constant CoM height
+
+# Time parameters
+dt = 0.01
+t_values = [i * dt for i in range(101)]
+
+# CoM trajectory: x(t) = A * sin(omega_walk * t)
+A = 0.05        # amplitude (m)
+omega_walk = 2 * math.pi / 0.6  # walking frequency
+
+print("Time(s)  CoM_x(m)  CoM_xdd(m/s^2)  ZMP_x(m)")
+print("-" * 50)
+
+for i, t in enumerate(t_values):
+    if i % 10 != 0:
+        continue
+    # CoM position and acceleration
+    x = A * math.sin(omega_walk * t)
+    xdd = -A * omega_walk**2 * math.sin(omega_walk * t)
+
+    # ZMP computation (constant height, no vertical acceleration)
+    zmp_x = x - (z_c / g) * xdd
+
+    print(f"{t:5.2f}    {x:8.5f}    {xdd:8.4f}       {zmp_x:8.5f}")
+`}
+/>
+
+## 多体系のZMP
+
+複数の剛体リンクを持つロボットでは、ZMPの計算はすべてのリンクにわたって総和をとります:
+
+$$
+p_x^{zmp} = \frac{\sum_{i=1}^{N} m_i(g + \ddot{z}_{G_i})x_{G_i} - \sum_{i=1}^{N}(m_i \ddot{x}_{G_i} z_{G_i} + I_{iy}\ddot{\theta}_{iy})}{\sum_{i=1}^{N} m_i(g + \ddot{z}_{G_i})}
+$$
+
+ここで、$(x_{G_i}, z_{G_i})$ はリンク $i$ の重心、$I_{iy}$ は $y$ 軸まわりの慣性モーメント、
+$\ddot{\theta}_{iy}$ は角加速度です。
+
+## ZMPに基づく歩行パターン生成
+
+ZMPに基づく歩行の典型的なパイプライン:
+
+1. **足踏みシーケンスの定義**: 各ステップの位置とタイミング
+2. **ZMP参照軌道の設計**: 支持多角形内に留まる軌道
+3. **CoM軌道の求解**: 目標ZMPを生成するCoM運動を求める
+4. **関節軌道の生成**: 逆運動学を使用
+
+ステップ3が計算上の核心的課題であり、プレビュー制御（第5章）で扱います。
+
+<CodeEditor
+  initialCode={`import math
+
+# ZMP reference trajectory for 3-step walk
+# Simplified: ZMP shifts between left and right foot positions
+
+foot_y_left = 0.05    # left foot y-position (m)
+foot_y_right = -0.05  # right foot y-position (m)
+step_duration = 0.6   # seconds per step
+dt = 0.01
+
+# Footstep plan (y-positions of support foot)
+footsteps = [
+    (0.0, foot_y_left),         # step 1: left support
+    (step_duration, foot_y_right),  # step 2: right support
+    (2 * step_duration, foot_y_left),   # step 3: left support
+]
+
+print("=== ZMP Reference Trajectory (Lateral) ===")
+print("Time(s)  ZMP_ref_y(m)  Support")
+print("-" * 40)
+
+total_time = 3 * step_duration
+t = 0.0
+while t <= total_time:
+    # Determine current support phase
+    phase = int(t / step_duration)
+    if phase >= len(footsteps):
+        phase = len(footsteps) - 1
+
+    zmp_ref_y = footsteps[phase][1]
+    support = "Left" if zmp_ref_y > 0 else "Right"
+
+    if int(t * 100) % 10 == 0:
+        print(f"{t:5.2f}    {zmp_ref_y:8.4f}      {support}")
+    t += dt
+
+print()
+print("The ZMP reference alternates between feet.")
+print("Preview control (Ch.5) computes the CoM trajectory")
+print("that tracks this ZMP reference.")
+`}
+/>
+
+## ZMPの限界
+
+1. **保守的**: ZMP基準は地面接触力のみを考慮し、角運動量を考慮しないため、過度に制約的である
+2. **平坦地面の仮定**: 不整地へのZMPの拡張には修正が必要
+3. **押し戻し回復なし**: ZMPベースの歩行器は、ZMPが支持多角形の外に押し出されるような大きな外乱から回復できない
+
+これらの限界が**キャプチャポイント**理論（第6章）の発展につながりました。
+
+## 参考文献
+
+- M. Vukobratovic and J. Juricic, "[Contribution to the synthesis of biped gait](https://doi.org/10.1109/tbme.1969.4502596)," *IEEE Trans. Bio-Medical Engineering*, 1969.
+- M. Vukobratovic and B. Borovac, "[Zero-Moment Point — Thirty five years of its life](https://www.cs.cmu.edu/~cga/legs/vukobratovic.pdf)," *Int. J. Humanoid Robotics*, 2004. ([DOI](https://doi.org/10.1142/S0219843604000083))
+
+<InteractiveDemo title="ZMP Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive ZMP trajectory and support polygon visualization coming soon.
+  </p>
+</InteractiveDemo>

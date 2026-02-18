@@ -1,0 +1,194 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { CPGNetworkDiagram } from "@/components/diagrams/CPGDiagram";
+
+# セントラルパターンジェネレータ (CPG)
+
+セントラルパターンジェネレータは、脊椎動物の脊髄に存在する神経回路で、リズミックな感覚入力を必要とせずにリズミックな運動パターンを生成します。CPGベースのコントローラは、ロコモーションへの生物学的に着想を得たアプローチを提供します。
+
+## 生物学的背景
+
+動物において、脊髄のCPGは歩行、遊泳、飛行の基本的なリズミックパターンを生成します。主な特性:
+
+- **自律リズム**: 外部タイミングなしに振動を生成
+- **感覚変調**: フィードバックが周波数、振幅、位相を調整
+- **頑健性**: 外乱に対しても機能を継続
+
+## 結合振動子モデル
+
+CPGネットワークは、特定の位相関係で結合された振動子で構成されます。CPGネットワークの位相モデルは以下の通りです:
+
+<MathBlock tex="\dot{\phi}_i = \omega_i + \sum_{j} w_{ij} \sin(\phi_j - \phi_i - \psi_{ij})" />
+
+ここで:
+- $\phi_i$ は振動子 $i$ の位相
+- $\omega_i$ は固有周波数
+- $w_{ij}$ は振動子 $j$ から $i$ への結合重み
+- $\psi_{ij}$ は目標位相差
+
+<CPGNetworkDiagram />
+
+## 歩行のための位相協調
+
+二足歩行における主な位相関係は以下の通りです:
+
+| 関節ペア | 位相オフセット | 意味 |
+|-----------|-------------|---------|
+| 左股関節 - 右股関節 | $\pi$ | 交互の脚運動 |
+| 股関節 - 膝（同側） | $\pi/2$ | 膝が股関節に対して四分の一周期先行 |
+| 左膝 - 右膝 | $\pi$ | 逆位相 |
+
+## 振幅制御CPG
+
+振幅制御を含むより完全なCPGモデルは、ホップ振動子を使用します:
+
+$$
+\dot{x}_i = \alpha(\mu_i - r_i^2)x_i - \omega_i y_i
+$$
+
+$$
+\dot{y}_i = \alpha(\mu_i - r_i^2)y_i + \omega_i x_i
+$$
+
+ここで $r_i = \sqrt{x_i^2 + y_i^2}$、$\mu_i$ は振幅を制御し、$\alpha$ はリミットサイクルへの収束速度を制御します。
+
+<CodeEditor
+  initialCode={`import math
+
+# CPG simulation using coupled phase oscillators
+# For bipedal walking with 4 oscillators
+
+# Parameters
+omega_base = 2 * math.pi * 1.5  # base frequency (1.5 Hz walking)
+coupling_strength = 5.0
+
+# Phase offsets (desired relationships)
+# 0: left hip, 1: right hip, 2: left knee, 3: right knee
+psi = [
+    [0, math.pi, math.pi/2, 0],       # from left hip's perspective
+    [math.pi, 0, 0, math.pi/2],       # from right hip's perspective
+    [-math.pi/2, 0, 0, math.pi],      # from left knee's perspective
+    [0, -math.pi/2, math.pi, 0],      # from right knee's perspective
+]
+
+# Coupling weights (symmetric network)
+w = [
+    [0, 3, 2, 0],
+    [3, 0, 0, 2],
+    [2, 0, 0, 1],
+    [0, 2, 1, 0],
+]
+
+# Initial phases (random start)
+phi = [0.0, 0.5, 1.0, 2.0]
+
+dt = 0.001
+sim_time = 3.0
+steps = int(sim_time / dt)
+
+print("=== CPG Simulation ===")
+print(f"Walking frequency: {omega_base/(2*math.pi):.1f} Hz")
+print()
+print("Time(s)  L_Hip    R_Hip    L_Knee   R_Knee   Phase_diff(L-R hip)")
+print("-" * 65)
+
+for k in range(steps):
+    t = k * dt
+
+    # Compute phase derivatives
+    dphi = [0.0] * 4
+    for i in range(4):
+        dphi[i] = omega_base
+        for j in range(4):
+            dphi[i] += w[i][j] * math.sin(phi[j] - phi[i] - psi[i][j])
+
+    # Update phases
+    for i in range(4):
+        phi[i] += dphi[i] * dt
+
+    # Print joint angles (sine of phase as proxy)
+    if k % 300 == 0:
+        angles = [math.sin(phi[i]) for i in range(4)]
+        phase_diff = (phi[1] - phi[0]) % (2 * math.pi)
+        if phase_diff > math.pi:
+            phase_diff -= 2 * math.pi
+        print(f"{t:5.2f}    {angles[0]:+6.3f}  {angles[1]:+6.3f}  "
+              f"{angles[2]:+6.3f}  {angles[3]:+6.3f}   "
+              f"{phase_diff:.3f} ({phase_diff/math.pi:.2f}pi)")
+
+print()
+print("Phase difference should converge to pi (anti-phase)")
+`}
+/>
+
+## CPGパラメータの調整
+
+CPGパラメータを変調することで歩容特性を変化させることができます:
+
+- **周波数 ($\omega$)**: 歩行速度
+- **振幅 ($\mu$)**: 歩幅
+- **位相オフセット ($\psi$)**: 歩容パターン（ウォーク、トロット、ギャロップ）
+- **結合重み ($w$)**: 関節間協調の強さ
+
+<CodeEditor
+  initialCode={`import math
+
+# Demonstrate CPG frequency modulation
+# Speed changes by adjusting omega
+
+speeds = [
+    ("Slow walk", 1.0),
+    ("Normal walk", 1.5),
+    ("Fast walk", 2.0),
+    ("Slow run", 2.5),
+]
+
+print("=== CPG Frequency Modulation ===")
+print()
+
+dt = 0.001
+for name, freq in speeds:
+    omega = 2 * math.pi * freq
+    amplitude = 0.3 + 0.15 * freq  # larger steps at higher speed
+
+    # Simulate one cycle
+    period = 1.0 / freq
+    steps = int(period / dt)
+    max_vel = 0
+    positions = []
+
+    phi = 0.0
+    for k in range(steps):
+        phi += omega * dt
+        pos = amplitude * math.sin(phi)
+        vel = amplitude * omega * math.cos(phi)
+        max_vel = max(max_vel, abs(vel))
+        positions.append(pos)
+
+    print(f"{name} ({freq:.1f} Hz):")
+    print(f"  Period: {period:.3f} s")
+    print(f"  Amplitude: {amplitude:.2f} rad")
+    print(f"  Max angular velocity: {max_vel:.2f} rad/s")
+    print()
+`}
+/>
+
+## CPG制御の利点
+
+1. **頑健性**: 本質的に安定なリズミックパターン
+2. **適応性**: 歩容間の滑らかな遷移
+3. **低次元性**: 少数のパラメータで複雑な運動を制御
+4. **感覚統合**: フィードバックがリズムを自然に変調
+5. **分散型**: 中央計算のボトルネックがない
+
+## 参考文献
+
+- A. Ijspeert, "[Central pattern generators for locomotion control in animals and robots: A review](https://doi.org/10.1016/j.neunet.2008.03.014)," *Neural Networks*, 2008.
+- L. Righetti and A. Ijspeert, "[Pattern generators with sensory feedback for the control of quadruped locomotion](https://doi.org/10.1109/ROBOT.2008.4543306)," *Proc. IEEE ICRA*, 2008.
+
+<InteractiveDemo title="CPG Oscillator Network">
+  <p className="text-sm text-gray-500">
+    Interactive CPG network with adjustable coupling coming soon.
+  </p>
+</InteractiveDemo>

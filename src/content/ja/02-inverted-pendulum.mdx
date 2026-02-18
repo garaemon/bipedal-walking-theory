@@ -1,0 +1,226 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { LIPMDiagram, WalkingTransitionDiagram } from "@/components/diagrams/InvertedPendulumDiagram";
+
+# 倒立振子モデル
+
+倒立振子は、二足歩行研究における最も基本的なモデルの一つです。
+歩行者を無質量の脚の上にある質点として近似することで、歩行の本質的な力学を捉える
+扱いやすい運動方程式を導出できます。
+
+## 台車・ポールシステム
+
+歩行の議論に入る前に、古典的な台車・ポール（台車上の倒立振子）を考えます。
+長さ $l$、質量 $m$ の単純な倒立振子の運動方程式は:
+
+$$
+ml^2 \ddot{\theta} - mgl\sin\theta = \tau
+$$
+
+微小角度の場合（$\sin\theta \approx \theta$）、これは次のように線形化されます:
+
+$$
+\ddot{\theta} - \frac{g}{l}\theta = \frac{\tau}{ml^2}
+$$
+
+これは**不安定な**系です: 線形化された力学の固有値に $\sqrt{g/l} > 0$ が含まれるため、
+制御がなければ微小な摂動が指数関数的に増大します。
+
+## 線形倒立振子モデル (LIPM)
+
+線形倒立振子モデルは、重心（CoM）を一定の高さ $z_c$ で移動するように拘束します。
+これにより力学が劇的に簡略化されます。
+
+<LIPMDiagram />
+
+### 導出
+
+質量 $m$ の質点が位置 $(x, z_c)$ にあり、無質量の脚が地面の点 $p_x$ に接触している場合を考えます。
+拘束力は脚に沿って作用します。
+
+水平方向と鉛直方向のニュートンの第二法則から:
+
+$$
+m\ddot{x} = F_x, \quad m\ddot{z} = F_z - mg
+$$
+
+$z = z_c$ が一定であるため、$\ddot{z} = 0$ となり、$F_z = mg$ です。
+
+脚の力の方向から $F_x / F_z = (x - p_x) / z_c$ が得られ、したがって:
+
+$$
+m\ddot{x} = \frac{mg}{z_c}(x - p_x)
+$$
+
+これにより、LIPMの基本方程式が得られます:
+
+<MathBlock tex="\ddot{x} = \frac{g}{z_c}(x - p_x)" />
+
+ここで、$x$ はCoMの位置、$p_x$ は足（支持点）の位置、
+$g$ は重力加速度、$z_c$ は一定のCoM高さです。
+
+### 固有振動数
+
+固有振動数を定義します:
+
+$$
+\omega = \sqrt{\frac{g}{z_c}}
+$$
+
+LIPM方程式は $\ddot{x} = \omega^2(x - p_x)$ となります。
+
+### 解析解
+
+支持点が原点にある場合（$p_x = 0$）、一般解は:
+
+$$
+x(t) = x_0 \cosh(\omega t) + \frac{\dot{x}_0}{\omega}\sinh(\omega t)
+$$
+
+$$
+\dot{x}(t) = x_0 \omega \sinh(\omega t) + \dot{x}_0 \cosh(\omega t)
+$$
+
+ここで、$x_0 = x(0)$ と $\dot{x}_0 = \dot{x}(0)$ は初期条件です。
+
+三角関数（$\cos$, $\sin$）ではなく双曲線関数（$\cosh$, $\sinh$）を使用していることに注意してください。
+これは倒立振子の力学の不安定な（発散する）性質を反映しています。
+
+## 3次元への拡張 (3D-LIPM)
+
+LIPMは自然に3次元に拡張できます。CoMが高さ $z_c$ に拘束される場合:
+
+$$
+\ddot{x} = \frac{g}{z_c}(x - p_x), \quad \ddot{y} = \frac{g}{z_c}(y - p_y)
+$$
+
+$x$ と $y$ の力学は**非結合**であり、これは歩行パターン生成にとって大きな利点です:
+矢状面と側方の運動を独立に計画できます。
+
+## 軌道エネルギー
+
+LIPMの力学を解析するのに有用な概念が**軌道エネルギー**です:
+
+$$
+E = \frac{1}{2}\dot{x}^2 - \frac{1}{2}\omega^2(x - p_x)^2
+$$
+
+この量は単脚支持相の間保存されます。軌道の分類:
+- $E > 0$: CoMが支持点を越える（歩行）
+- $E = 0$: CoMが支持点に漸近的に近づくか離れる
+- $E < 0$: CoMが支持点の周りで振動する（歩行としては物理的に意味がない）
+
+## Python シミュレーション: LIPM軌道
+
+<CodeEditor
+  initialCode={`import math
+
+# LIPM parameters
+g = 9.81      # gravity (m/s^2)
+z_c = 0.8     # CoM height (m)
+omega = math.sqrt(g / z_c)  # natural frequency
+
+print(f"Natural frequency: omega = {omega:.3f} rad/s")
+print(f"Time constant: 1/omega = {1/omega:.3f} s")
+print()
+
+# Initial conditions
+x0 = -0.1    # initial CoM position (m)
+xd0 = 0.3    # initial CoM velocity (m/s)
+p_x = 0.0    # support point at origin
+
+# Simulate LIPM trajectory
+dt = 0.01
+t_end = 1.0
+steps = int(t_end / dt)
+
+print("Time(s)  x(m)     xdot(m/s)  Energy")
+print("-" * 45)
+
+for i in range(0, steps + 1, 10):
+    t = i * dt
+    # Analytical solution (support at origin)
+    x = x0 * math.cosh(omega * t) + (xd0 / omega) * math.sinh(omega * t)
+    xdot = x0 * omega * math.sinh(omega * t) + xd0 * math.cosh(omega * t)
+    # Orbital energy (should be conserved)
+    energy = 0.5 * xdot**2 - 0.5 * omega**2 * x**2
+    print(f"{t:5.2f}    {x:7.4f}  {xdot:7.4f}    {energy:7.4f}")
+`}
+/>
+
+## LIPMによる歩行
+
+<WalkingTransitionDiagram />
+
+歩行パターンを生成するために、複数の単脚支持相を連鎖させます。
+各歩行遷移で、支持点が新しい足の位置に移動します。
+
+重要な知見は、適切な歩幅とタイミングを選択することで、
+周期的な歩行パターンを維持できることです。**歩行間遷移**は、
+一歩の終了時の状態を次の一歩の初期状態にマッピングします。
+
+<CodeEditor
+  initialCode={`import math
+
+# LIPM walking simulation
+g = 9.81
+z_c = 0.8
+omega = math.sqrt(g / z_c)
+T_step = 0.4  # step duration (s)
+
+# Step length pattern (alternating feet)
+step_length = 0.2  # meters
+
+# Start at the support foot
+x = -step_length / 2  # CoM starts behind support
+xdot = (step_length / 2) * omega / math.tanh(omega * T_step / 2)
+
+print(f"Step duration: {T_step:.2f} s")
+print(f"Step length: {step_length:.2f} m")
+print(f"Initial velocity: {xdot:.4f} m/s")
+print()
+
+support_x = 0.0
+print("Step  t(s)    CoM_x(m)  Velocity(m/s)  Support(m)")
+print("-" * 55)
+
+for step in range(5):
+    # Simulate one step
+    for i in range(int(T_step / 0.01) + 1):
+        t = i * 0.01
+        dx = x - support_x
+        x_t = support_x + dx * math.cosh(omega * t) + (xdot / omega) * math.sinh(omega * t)
+        xdot_t = dx * omega * math.sinh(omega * t) + xdot * math.cosh(omega * t)
+
+    # State at end of step
+    x = x_t
+    xdot = xdot_t
+    print(f"  {step}    {(step+1)*T_step:.2f}   {x:8.4f}     {xdot:8.4f}      {support_x:.3f}")
+
+    # Transition: shift support to new foot
+    support_x += step_length
+`}
+/>
+
+## LIPMの限界
+
+LIPMは強力なモデルですが、重要な限界があります:
+
+1. **一定高さの仮定**: 実際の歩行では鉛直方向のCoM運動が存在する
+2. **質点モデル**: 四肢や体幹の角運動量を無視している
+3. **無質量の脚**: 脚の振り動力学が捉えられない
+4. **両脚支持なし**: 遷移が瞬時に行われる
+
+これらの限界は、後の章で扱うより高度なモデルの動機となります。
+
+## 参考文献
+
+- S. Kajita et al., "[The 3D Linear Inverted Pendulum Mode: A simple modeling for a biped walking pattern generation](https://doi.org/10.1109/IROS.2001.973365)," *Proc. IEEE/RSJ IROS*, 2001.
+- S. Kajita et al., "[Biped Walking Pattern Generation by using Preview Control of Zero-Moment Point](https://doi.org/10.1109/ROBOT.2003.1241826)," *Proc. IEEE ICRA*, 2003.
+
+<InteractiveDemo title="LIPM Simulation">
+  <p className="text-sm text-gray-500">
+    Interactive LIPM simulation with adjustable parameters coming soon.
+  </p>
+</InteractiveDemo>

@@ -1,0 +1,264 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { RigidBodyDiagram, DoublePendulumDiagram } from "@/components/diagrams/RigidBodyDiagram";
+
+# Rigid Body Dynamics
+
+This chapter covers the fundamentals of rigid body dynamics as they apply to bipedal walking.
+Understanding these foundations is essential for modeling and controlling walking robots.
+
+## Newton-Euler Equations
+
+The motion of a rigid body is governed by Newton's second law for translation and Euler's equation for rotation.
+
+For translational motion:
+
+$$
+\mathbf{F} = m\mathbf{a}
+$$
+
+where $\mathbf{F}$ is the net force, $m$ is the mass, and $\mathbf{a}$ is the acceleration of the center of mass.
+
+For rotational motion about the center of mass:
+
+$$
+\boldsymbol{\tau} = \mathbf{I}\boldsymbol{\alpha} + \boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}
+$$
+
+where $\boldsymbol{\tau}$ is the net torque, $\mathbf{I}$ is the inertia tensor,
+$\boldsymbol{\alpha}$ is the angular acceleration, and $\boldsymbol{\omega}$ is the angular velocity.
+
+The term $\boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$ is the **gyroscopic effect** —
+it couples rotational motions in different axes and is significant for 3D walking dynamics.
+
+<RigidBodyDiagram />
+
+## Inertia Tensor
+
+The inertia tensor $\mathbf{I}$ describes how mass is distributed relative to the rotation axes:
+
+$$
+\mathbf{I} = \begin{bmatrix}
+I_{xx} & -I_{xy} & -I_{xz} \\
+-I_{xy} & I_{yy} & -I_{yz} \\
+-I_{xz} & -I_{yz} & I_{zz}
+\end{bmatrix}
+$$
+
+The diagonal elements are **moments of inertia** and the off-diagonal elements are
+**products of inertia**.
+
+For a solid cylinder of mass $m$, radius $r$, and length $h$ (common approximation
+for robot limb segments):
+
+$$
+I_{xx} = I_{yy} = \frac{1}{12}m(3r^2 + h^2), \quad I_{zz} = \frac{1}{2}mr^2
+$$
+
+### Parallel Axis Theorem
+
+When the rotation axis is offset from the center of mass by distance $d$:
+
+$$
+I_{axis} = I_{cm} + md^2
+$$
+
+This is essential for computing the inertia of composite robot links.
+
+<CodeEditor
+  initialCode={`import math
+
+# Inertia tensor computation for a robot leg
+# Modeled as two cylinders (thigh + shank)
+
+# Thigh parameters
+m_thigh = 3.0      # mass (kg)
+r_thigh = 0.04     # radius (m)
+h_thigh = 0.40     # length (m)
+
+# Shank parameters
+m_shank = 2.0
+r_shank = 0.03
+h_shank = 0.35
+
+# Moments of inertia about CoM (cylinder approximation)
+def compute_cylinder_inertia(m, r, h):
+    Ixx = (1/12) * m * (3 * r**2 + h**2)
+    Iyy = Ixx
+    Izz = 0.5 * m * r**2
+    return Ixx, Iyy, Izz
+
+Ixx_t, Iyy_t, Izz_t = compute_cylinder_inertia(m_thigh, r_thigh, h_thigh)
+Ixx_s, Iyy_s, Izz_s = compute_cylinder_inertia(m_shank, r_shank, h_shank)
+
+print("=== Robot Leg Inertia Properties ===")
+print(f"\\nThigh (m={m_thigh}kg, r={r_thigh}m, h={h_thigh}m):")
+print(f"  Ixx = Iyy = {Ixx_t:.6f} kg*m^2")
+print(f"  Izz = {Izz_t:.6f} kg*m^2")
+
+print(f"\\nShank (m={m_shank}kg, r={r_shank}m, h={h_shank}m):")
+print(f"  Ixx = Iyy = {Ixx_s:.6f} kg*m^2")
+print(f"  Izz = {Izz_s:.6f} kg*m^2")
+
+# Parallel axis theorem: shank inertia about hip
+d_shank = h_thigh + h_shank / 2  # distance from hip to shank CoM
+Ixx_shank_hip = Ixx_s + m_shank * d_shank**2
+
+print(f"\\n=== Parallel Axis Theorem ===")
+print(f"Shank CoM distance from hip: {d_shank:.3f} m")
+print(f"Shank Ixx about hip: {Ixx_shank_hip:.6f} kg*m^2")
+print(f"  (vs about own CoM: {Ixx_s:.6f} kg*m^2)")
+print(f"  Ratio: {Ixx_shank_hip/Ixx_s:.1f}x increase")
+`}
+/>
+
+## Equations of Motion for Articulated Bodies
+
+For a robot with $n$ joints, the equations of motion in joint space are:
+
+<MathBlock tex="M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \boldsymbol{\tau}" />
+
+where:
+- $\mathbf{q} \in \mathbb{R}^n$: joint angles
+- $M(\mathbf{q}) \in \mathbb{R}^{n \times n}$: mass (inertia) matrix — symmetric and positive definite
+- $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}}$: Coriolis and centrifugal forces
+- $\mathbf{g}(\mathbf{q})$: gravitational forces
+- $\boldsymbol{\tau}$: joint torques
+
+### Properties of the Mass Matrix
+
+The mass matrix $M(\mathbf{q})$ has important properties:
+1. **Symmetric**: $M = M^T$
+2. **Positive definite**: $\mathbf{x}^T M \mathbf{x} > 0$ for all $\mathbf{x} \neq 0$
+3. **Configuration dependent**: changes with joint angles
+
+### Coriolis Matrix
+
+The Coriolis matrix can be computed from **Christoffel symbols**:
+
+$$
+C_{ij} = \sum_{k=1}^{n} c_{ijk} \dot{q}_k, \quad c_{ijk} = \frac{1}{2}\left(\frac{\partial M_{ij}}{\partial q_k} + \frac{\partial M_{ik}}{\partial q_j} - \frac{\partial M_{jk}}{\partial q_i}\right)
+$$
+
+## Forward and Inverse Dynamics
+
+Two fundamental computational problems:
+
+**Forward dynamics**: Given joint torques $\boldsymbol{\tau}$, compute accelerations $\ddot{\mathbf{q}}$:
+
+$$
+\ddot{\mathbf{q}} = M(\mathbf{q})^{-1}(\boldsymbol{\tau} - \mathbf{C}\dot{\mathbf{q}} - \mathbf{g})
+$$
+
+**Inverse dynamics**: Given desired accelerations $\ddot{\mathbf{q}}$, compute required torques:
+
+$$
+\boldsymbol{\tau} = M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g}
+$$
+
+Forward dynamics is used in simulation; inverse dynamics is used in control.
+
+## Contact Forces and Friction
+
+When a walking robot contacts the ground, additional forces enter the equations:
+
+$$
+M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g} = \boldsymbol{\tau} + \mathbf{J}_c^T \mathbf{f}_c
+$$
+
+where $\mathbf{J}_c$ is the contact Jacobian and $\mathbf{f}_c$ is the contact force vector.
+
+### Coulomb Friction Model
+
+The friction force $f_t$ is bounded by the normal force $f_n$:
+
+$$
+|f_t| \leq \mu f_n
+$$
+
+where $\mu$ is the friction coefficient. This constraint defines a **friction cone**.
+For stable walking, the ground reaction force must remain inside the friction cone.
+
+## Example: Double Pendulum
+
+The double pendulum is a minimal model for a two-link leg:
+
+<DoublePendulumDiagram />
+
+<CodeEditor
+  initialCode={`import math
+
+# Double pendulum dynamics
+# (simplified model of a two-link robot leg)
+
+# Parameters
+m1, m2 = 3.0, 2.0      # link masses (kg)
+l1, l2 = 0.4, 0.35      # link lengths (m)
+lc1, lc2 = l1/2, l2/2   # CoM distances from joints
+I1 = m1 * l1**2 / 12    # link inertias
+I2 = m2 * l2**2 / 12
+g = 9.81
+
+def compute_mass_matrix(q1, q2):
+    """Compute 2x2 mass matrix for double pendulum."""
+    c2 = math.cos(q2)
+    M11 = (m1 * lc1**2 + I1 + m2 * (l1**2 + lc2**2 + 2*l1*lc2*c2) + I2)
+    M12 = m2 * (lc2**2 + l1*lc2*c2) + I2
+    M21 = M12
+    M22 = m2 * lc2**2 + I2
+    return M11, M12, M21, M22
+
+def compute_gravity_vector(q1, q2):
+    """Compute gravity torques."""
+    g1 = (m1*lc1 + m2*l1) * g * math.sin(q1) + m2*lc2*g*math.sin(q1+q2)
+    g2 = m2*lc2*g*math.sin(q1+q2)
+    return g1, g2
+
+# Evaluate at a specific configuration
+q1 = math.pi/4   # 45 degrees
+q2 = -math.pi/6  # -30 degrees
+
+M11, M12, M21, M22 = compute_mass_matrix(q1, q2)
+g1, g2 = compute_gravity_vector(q1, q2)
+
+print("=== Double Pendulum at q1=45deg, q2=-30deg ===")
+print(f"\\nMass matrix:")
+print(f"  M = [{M11:.4f}  {M12:.4f}]")
+print(f"      [{M21:.4f}  {M22:.4f}]")
+print(f"\\nGravity torques:")
+print(f"  g1 = {g1:.4f} N*m  (hip)")
+print(f"  g2 = {g2:.4f} N*m  (knee)")
+
+# Inverse dynamics: what torques needed to hold this pose?
+print(f"\\nTo hold this pose statically:")
+print(f"  tau_hip  = {g1:.4f} N*m")
+print(f"  tau_knee = {g2:.4f} N*m")
+
+# Determinant of mass matrix (important for invertibility)
+det = M11 * M22 - M12 * M21
+print(f"\\nMass matrix determinant: {det:.6f}")
+print(f"Mass matrix is {'positive definite' if det > 0 else 'NOT positive definite'}")
+`}
+/>
+
+## Summary
+
+The key concepts from this chapter that recur throughout bipedal walking:
+
+1. **Newton-Euler equations** describe rigid body motion in translation and rotation
+2. **Inertia tensor** characterizes mass distribution
+3. **Equations of motion** $M\ddot{q} + C\dot{q} + g = \tau$ govern articulated robots
+4. **Contact forces** and friction constraints are essential for ground interaction
+5. **Forward/inverse dynamics** are the core computational tools for simulation and control
+
+## References
+
+- R. Featherstone, [*Rigid Body Dynamics Algorithms*](https://link.springer.com/book/10.1007/978-1-4899-7560-7), Springer, 2008.
+- R. Murray, Z. Li, and S. Sastry, [*A Mathematical Introduction to Robotic Manipulation*](https://www.cds.caltech.edu/~murray/mlswiki/index.php/Main_Page), CRC Press, 1994.
+
+<InteractiveDemo title="Rigid Body Simulation">
+  <p className="text-sm text-gray-500">
+    Interactive 3D rigid body simulation with adjustable parameters coming soon.
+  </p>
+</InteractiveDemo>

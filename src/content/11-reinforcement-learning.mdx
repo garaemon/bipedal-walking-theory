@@ -1,0 +1,213 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { RLLoopDiagram } from "@/components/diagrams/RLDiagram";
+
+# Reinforcement Learning for Walking
+
+Reinforcement Learning (RL) has revolutionized bipedal locomotion by
+enabling robots to discover walking behaviors through trial and error
+in simulation, often surpassing hand-designed controllers.
+
+## MDP Formulation for Locomotion
+
+Walking is formulated as a **Markov Decision Process** (MDP):
+
+- **State** $s$: joint angles, velocities, body orientation, contact states
+- **Action** $a$: target joint positions or torques
+- **Reward** $r(s, a)$: shaped to encourage desired walking behavior
+- **Transition** $P(s'|s, a)$: governed by physics simulation
+
+The goal is to find a policy $\pi_\theta(a|s)$ that maximizes expected cumulative reward:
+
+$$
+J(\theta) = \mathbb{E}_{\pi_\theta}\left[\sum_{t=0}^{T} \gamma^t r(s_t, a_t)\right]
+$$
+
+<RLLoopDiagram />
+
+## Reward Function Design
+
+The reward function is critical and typically includes:
+
+$$
+r = w_v r_{velocity} + w_e r_{energy} + w_a r_{alive} + w_s r_{style}
+$$
+
+| Component | Formula | Purpose |
+|-----------|---------|---------|
+| Velocity | $r_v = \exp(-\|v - v_{target}\|^2)$ | Track desired speed |
+| Energy | $r_e = -\|\boldsymbol{\tau}\|^2$ | Minimize energy use |
+| Alive | $r_a = +1$ per step | Encourage survival |
+| Style | $r_s = -\|q - q_{ref}\|^2$ | Match reference motion |
+
+### Common Pitfalls
+
+- **Reward hacking**: robot finds unexpected ways to maximize reward
+  (e.g., sliding instead of walking)
+- **Sparse rewards**: "reach the goal" gives insufficient learning signal
+- **Over-constraining**: too many style penalties prevent exploration
+
+## Policy Gradient Methods
+
+### PPO (Proximal Policy Optimization)
+
+The most widely used algorithm for locomotion:
+
+$$
+L^{CLIP}(\theta) = \mathbb{E}\left[\min\left(r_t(\theta)A_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t\right)\right]
+$$
+
+where $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ is the
+probability ratio and $A_t$ is the advantage estimate.
+
+PPO is popular because it balances sample efficiency with stability.
+
+<CodeEditor
+  initialCode={`import math
+import random
+
+# Simplified RL for a 1D walking task
+# (CartPole-like balance + forward velocity)
+
+random.seed(42)
+
+class SimpleWalker:
+    """1D walker: state = [position, velocity, angle, angular_vel]"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.x = 0.0
+        self.v = 0.0
+        self.theta = random.uniform(-0.1, 0.1)
+        self.omega = 0.0
+        return self.get_state()
+
+    def get_state(self):
+        return [self.x, self.v, self.theta, self.omega]
+
+    def step(self, action):
+        # Simplified dynamics
+        force = action * 10.0  # scale action
+        dt = 0.02
+        g = 9.81
+        l = 1.0
+        m = 1.0
+
+        # Update angle (inverted pendulum)
+        alpha = (g * math.sin(self.theta) + force * math.cos(self.theta)) / l
+        self.omega += alpha * dt
+        self.theta += self.omega * dt
+
+        # Update position
+        self.v += force * dt / m
+        self.x += self.v * dt
+
+        # Compute reward
+        alive = abs(self.theta) < 0.5  # not fallen
+        reward = 0.0
+        if alive:
+            reward += 1.0  # alive bonus
+            reward += 0.5 * min(self.v, 1.0)  # forward velocity
+            reward -= 0.1 * abs(self.theta)  # upright bonus
+            reward -= 0.01 * action**2  # energy penalty
+
+        done = not alive
+        return self.get_state(), reward, done
+
+# Simple policy: linear function of state
+# theta_policy = weights
+weights = [0.0, 0.0, 0.0, 0.0]
+
+def compute_policy(state, w):
+    """Linear policy: action = w . state"""
+    action = sum(w[i] * state[i] for i in range(4))
+    return max(-1, min(1, action))  # clip to [-1, 1]
+
+def evaluate_policy(env, w, max_steps=200):
+    """Run one episode and return total reward."""
+    state = env.reset()
+    total_reward = 0
+    for _ in range(max_steps):
+        action = compute_policy(state, w)
+        state, reward, done = env.step(action)
+        total_reward += reward
+        if done:
+            break
+    return total_reward
+
+# Simple evolution strategy for learning
+env = SimpleWalker()
+best_weights = weights[:]
+best_reward = evaluate_policy(env, best_weights)
+
+print("=== Simple RL Training (Evolution Strategy) ===")
+print(f"Initial reward: {best_reward:.2f}")
+print()
+print("Gen  Best_Reward  Avg_Reward  Weights")
+print("-" * 60)
+
+n_generations = 30
+n_population = 10
+noise_std = 0.5
+
+for gen in range(n_generations):
+    rewards = []
+    population = []
+    for _ in range(n_population):
+        w = [best_weights[i] + random.gauss(0, noise_std) for i in range(4)]
+        r = evaluate_policy(env, w)
+        rewards.append(r)
+        population.append(w)
+
+    avg_r = sum(rewards) / len(rewards)
+    best_idx = rewards.index(max(rewards))
+    if rewards[best_idx] > best_reward:
+        best_reward = rewards[best_idx]
+        best_weights = population[best_idx][:]
+
+    if gen % 5 == 0:
+        w_str = [f"{w:.2f}" for w in best_weights]
+        print(f" {gen:2d}      {best_reward:7.2f}     {avg_r:7.2f}    {w_str}")
+
+    noise_std *= 0.95  # decay noise
+
+print(f"\\nFinal best reward: {best_reward:.2f}")
+print(f"Learned weights: {[f'{w:.3f}' for w in best_weights]}")
+`}
+/>
+
+## Motion Imitation (DeepMimic)
+
+Instead of learning from scratch, **motion imitation** provides reference
+motions from motion capture or animation:
+
+$$
+r_{imitation} = w_p \exp(-\|q - q^{ref}\|^2) + w_v \exp(-\|\dot{q} - \dot{q}^{ref}\|^2)
+$$
+
+This dramatically improves learning speed and motion quality by guiding
+the policy toward natural-looking gaits.
+
+## Curriculum Learning
+
+Complex walking is often learned progressively:
+
+1. **Standing balance**: learn to stay upright
+2. **Walking on flat ground**: basic forward locomotion
+3. **Varied terrain**: hills, stairs, obstacles
+4. **External perturbations**: push recovery
+5. **Agile behaviors**: running, jumping, turning
+
+## References
+
+- X. Peng et al., "[DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based Character Skills](https://arxiv.org/abs/1804.02717)," *ACM TOG*, 2018.
+- Z. Xie et al., "[Feedback Control For Cassie With Deep Reinforcement Learning](https://arxiv.org/abs/1803.05580)," *Proc. IROS*, 2018.
+- J. Schulman et al., "[Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)," *arXiv*, 2017.
+
+<InteractiveDemo title="RL Training Visualization">
+  <p className="text-sm text-gray-500">
+    Interactive RL training visualization with reward shaping demo coming soon.
+  </p>
+</InteractiveDemo>

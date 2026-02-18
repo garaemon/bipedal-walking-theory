@@ -1,0 +1,262 @@
+import { MathBlock } from "@/components/math/MathBlock";
+import { CodeEditor } from "@/components/code/CodeEditor";
+import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { RigidBodyDiagram, DoublePendulumDiagram } from "@/components/diagrams/RigidBodyDiagram";
+
+# 剛体力学
+
+本章では、二足歩行に関連する剛体力学の基礎を扱います。
+これらの基礎を理解することは、歩行ロボットのモデリングと制御にとって不可欠です。
+
+## ニュートン・オイラー方程式
+
+剛体の運動は、並進運動に関するニュートンの第二法則と、回転運動に関するオイラーの方程式によって支配されます。
+
+並進運動について:
+
+$$
+\mathbf{F} = m\mathbf{a}
+$$
+
+ここで、$\mathbf{F}$ は合力、$m$ は質量、$\mathbf{a}$ は重心の加速度です。
+
+重心まわりの回転運動について:
+
+$$
+\boldsymbol{\tau} = \mathbf{I}\boldsymbol{\alpha} + \boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}
+$$
+
+ここで、$\boldsymbol{\tau}$ は合トルク、$\mathbf{I}$ は慣性テンソル、
+$\boldsymbol{\alpha}$ は角加速度、$\boldsymbol{\omega}$ は角速度です。
+
+$\boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$ の項は**ジャイロスコピック効果**であり、
+異なる軸の回転運動を結合し、3次元歩行力学において重要な役割を果たします。
+
+<RigidBodyDiagram />
+
+## 慣性テンソル
+
+慣性テンソル $\mathbf{I}$ は、回転軸に対する質量分布を表します:
+
+$$
+\mathbf{I} = \begin{bmatrix}
+I_{xx} & -I_{xy} & -I_{xz} \\
+-I_{xy} & I_{yy} & -I_{yz} \\
+-I_{xz} & -I_{yz} & I_{zz}
+\end{bmatrix}
+$$
+
+対角要素は**慣性モーメント**、非対角要素は**慣性乗積**です。
+
+質量 $m$、半径 $r$、長さ $h$ の中実円柱（ロボットの肢セグメントの一般的な近似）の場合:
+
+$$
+I_{xx} = I_{yy} = \frac{1}{12}m(3r^2 + h^2), \quad I_{zz} = \frac{1}{2}mr^2
+$$
+
+### 平行軸の定理
+
+回転軸が重心から距離 $d$ だけ離れている場合:
+
+$$
+I_{axis} = I_{cm} + md^2
+$$
+
+これは、複合的なロボットリンクの慣性を計算するために不可欠です。
+
+<CodeEditor
+  initialCode={`import math
+
+# Inertia tensor computation for a robot leg
+# Modeled as two cylinders (thigh + shank)
+
+# Thigh parameters
+m_thigh = 3.0      # mass (kg)
+r_thigh = 0.04     # radius (m)
+h_thigh = 0.40     # length (m)
+
+# Shank parameters
+m_shank = 2.0
+r_shank = 0.03
+h_shank = 0.35
+
+# Moments of inertia about CoM (cylinder approximation)
+def compute_cylinder_inertia(m, r, h):
+    Ixx = (1/12) * m * (3 * r**2 + h**2)
+    Iyy = Ixx
+    Izz = 0.5 * m * r**2
+    return Ixx, Iyy, Izz
+
+Ixx_t, Iyy_t, Izz_t = compute_cylinder_inertia(m_thigh, r_thigh, h_thigh)
+Ixx_s, Iyy_s, Izz_s = compute_cylinder_inertia(m_shank, r_shank, h_shank)
+
+print("=== Robot Leg Inertia Properties ===")
+print(f"\\nThigh (m={m_thigh}kg, r={r_thigh}m, h={h_thigh}m):")
+print(f"  Ixx = Iyy = {Ixx_t:.6f} kg*m^2")
+print(f"  Izz = {Izz_t:.6f} kg*m^2")
+
+print(f"\\nShank (m={m_shank}kg, r={r_shank}m, h={h_shank}m):")
+print(f"  Ixx = Iyy = {Ixx_s:.6f} kg*m^2")
+print(f"  Izz = {Izz_s:.6f} kg*m^2")
+
+# Parallel axis theorem: shank inertia about hip
+d_shank = h_thigh + h_shank / 2  # distance from hip to shank CoM
+Ixx_shank_hip = Ixx_s + m_shank * d_shank**2
+
+print(f"\\n=== Parallel Axis Theorem ===")
+print(f"Shank CoM distance from hip: {d_shank:.3f} m")
+print(f"Shank Ixx about hip: {Ixx_shank_hip:.6f} kg*m^2")
+print(f"  (vs about own CoM: {Ixx_s:.6f} kg*m^2)")
+print(f"  Ratio: {Ixx_shank_hip/Ixx_s:.1f}x increase")
+`}
+/>
+
+## 多関節体の運動方程式
+
+$n$ 個の関節を持つロボットの関節空間における運動方程式は次のとおりです:
+
+<MathBlock tex="M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \boldsymbol{\tau}" />
+
+ここで:
+- $\mathbf{q} \in \mathbb{R}^n$: 関節角度
+- $M(\mathbf{q}) \in \mathbb{R}^{n \times n}$: 質量（慣性）行列 — 対称かつ正定値
+- $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}}$: コリオリ力と遠心力
+- $\mathbf{g}(\mathbf{q})$: 重力
+- $\boldsymbol{\tau}$: 関節トルク
+
+### 質量行列の性質
+
+質量行列 $M(\mathbf{q})$ は重要な性質を持ちます:
+1. **対称性**: $M = M^T$
+2. **正定値性**: すべての $\mathbf{x} \neq 0$ に対して $\mathbf{x}^T M \mathbf{x} > 0$
+3. **構成依存性**: 関節角度に応じて変化する
+
+### コリオリ行列
+
+コリオリ行列は**クリストッフェル記号**から計算できます:
+
+$$
+C_{ij} = \sum_{k=1}^{n} c_{ijk} \dot{q}_k, \quad c_{ijk} = \frac{1}{2}\left(\frac{\partial M_{ij}}{\partial q_k} + \frac{\partial M_{ik}}{\partial q_j} - \frac{\partial M_{jk}}{\partial q_i}\right)
+$$
+
+## 順動力学と逆動力学
+
+2つの基本的な計算問題があります:
+
+**順動力学**: 関節トルク $\boldsymbol{\tau}$ が与えられたとき、加速度 $\ddot{\mathbf{q}}$ を計算する:
+
+$$
+\ddot{\mathbf{q}} = M(\mathbf{q})^{-1}(\boldsymbol{\tau} - \mathbf{C}\dot{\mathbf{q}} - \mathbf{g})
+$$
+
+**逆動力学**: 目標加速度 $\ddot{\mathbf{q}}$ が与えられたとき、必要なトルクを計算する:
+
+$$
+\boldsymbol{\tau} = M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g}
+$$
+
+順動力学はシミュレーションに、逆動力学は制御に使用されます。
+
+## 接触力と摩擦
+
+歩行ロボットが地面と接触するとき、運動方程式に追加の力が加わります:
+
+$$
+M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g} = \boldsymbol{\tau} + \mathbf{J}_c^T \mathbf{f}_c
+$$
+
+ここで、$\mathbf{J}_c$ は接触ヤコビアン、$\mathbf{f}_c$ は接触力ベクトルです。
+
+### クーロン摩擦モデル
+
+摩擦力 $f_t$ は垂直抗力 $f_n$ によって制限されます:
+
+$$
+|f_t| \leq \mu f_n
+$$
+
+ここで、$\mu$ は摩擦係数です。この拘束条件は**摩擦錐**を定義します。
+安定した歩行のためには、地面反力が摩擦錐の内部に留まる必要があります。
+
+## 例: 二重振子
+
+二重振子は、2リンク脚の最小限のモデルです:
+
+<DoublePendulumDiagram />
+
+<CodeEditor
+  initialCode={`import math
+
+# Double pendulum dynamics
+# (simplified model of a two-link robot leg)
+
+# Parameters
+m1, m2 = 3.0, 2.0      # link masses (kg)
+l1, l2 = 0.4, 0.35      # link lengths (m)
+lc1, lc2 = l1/2, l2/2   # CoM distances from joints
+I1 = m1 * l1**2 / 12    # link inertias
+I2 = m2 * l2**2 / 12
+g = 9.81
+
+def compute_mass_matrix(q1, q2):
+    """Compute 2x2 mass matrix for double pendulum."""
+    c2 = math.cos(q2)
+    M11 = (m1 * lc1**2 + I1 + m2 * (l1**2 + lc2**2 + 2*l1*lc2*c2) + I2)
+    M12 = m2 * (lc2**2 + l1*lc2*c2) + I2
+    M21 = M12
+    M22 = m2 * lc2**2 + I2
+    return M11, M12, M21, M22
+
+def compute_gravity_vector(q1, q2):
+    """Compute gravity torques."""
+    g1 = (m1*lc1 + m2*l1) * g * math.sin(q1) + m2*lc2*g*math.sin(q1+q2)
+    g2 = m2*lc2*g*math.sin(q1+q2)
+    return g1, g2
+
+# Evaluate at a specific configuration
+q1 = math.pi/4   # 45 degrees
+q2 = -math.pi/6  # -30 degrees
+
+M11, M12, M21, M22 = compute_mass_matrix(q1, q2)
+g1, g2 = compute_gravity_vector(q1, q2)
+
+print("=== Double Pendulum at q1=45deg, q2=-30deg ===")
+print(f"\\nMass matrix:")
+print(f"  M = [{M11:.4f}  {M12:.4f}]")
+print(f"      [{M21:.4f}  {M22:.4f}]")
+print(f"\\nGravity torques:")
+print(f"  g1 = {g1:.4f} N*m  (hip)")
+print(f"  g2 = {g2:.4f} N*m  (knee)")
+
+# Inverse dynamics: what torques needed to hold this pose?
+print(f"\\nTo hold this pose statically:")
+print(f"  tau_hip  = {g1:.4f} N*m")
+print(f"  tau_knee = {g2:.4f} N*m")
+
+# Determinant of mass matrix (important for invertibility)
+det = M11 * M22 - M12 * M21
+print(f"\\nMass matrix determinant: {det:.6f}")
+print(f"Mass matrix is {'positive definite' if det > 0 else 'NOT positive definite'}")
+`}
+/>
+
+## まとめ
+
+本章の主要な概念は、二足歩行全体を通じて繰り返し登場します:
+
+1. **ニュートン・オイラー方程式**は並進と回転における剛体の運動を記述する
+2. **慣性テンソル**は質量分布を特徴づける
+3. **運動方程式** $M\ddot{q} + C\dot{q} + g = \tau$ は多関節ロボットを支配する
+4. **接触力**と摩擦拘束は地面との相互作用に不可欠である
+5. **順動力学/逆動力学**はシミュレーションと制御の核となる計算手法である
+
+## 参考文献
+
+- R. Featherstone, [*Rigid Body Dynamics Algorithms*](https://link.springer.com/book/10.1007/978-1-4899-7560-7), Springer, 2008.
+- R. Murray, Z. Li, and S. Sastry, [*A Mathematical Introduction to Robotic Manipulation*](https://www.cds.caltech.edu/~murray/mlswiki/index.php/Main_Page), CRC Press, 1994.
+
+<InteractiveDemo title="Rigid Body Simulation">
+  <p className="text-sm text-gray-500">
+    Interactive 3D rigid body simulation with adjustable parameters coming soon.
+  </p>
+</InteractiveDemo>
