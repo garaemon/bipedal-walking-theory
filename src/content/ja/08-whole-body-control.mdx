@@ -71,7 +71,10 @@ $$
 
 $\mathbf{J}$ の零空間は、タスク空間出力に影響を与えない運動を表します。幾何学的には、零空間とは $\mathbf{J}\dot{\mathbf{q}} = \mathbf{0}$ となるすべての関節速度方向の集合です。ロボットはタスク空間出力を変えずに内部的に動くことができます。
 
-行列 $\mathbf{N} = \mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J}$ は零空間への**射影子**です。任意の関節速度 $\dot{\mathbf{q}}_0$ に対して $\mathbf{J}(\mathbf{N}\dot{\mathbf{q}}_0) = (\mathbf{J} - \mathbf{J}\mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0 = \mathbf{0}$ となります（$\mathbf{J}\mathbf{J}^{\dagger}\mathbf{J} = \mathbf{J}$ は擬似逆行列の性質）。射影された成分 $\mathbf{N}\dot{\mathbf{q}}_0$ は完全に零空間に含まれ、主タスクに影響を与えません。
+行列 $\mathbf{N} = \mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J}$ は零空間への**射影子**です。
+任意の関節速度 $\dot{\mathbf{q}}_0$ に対して $\mathbf{J}(\mathbf{N}\dot{\mathbf{q}}_0) = (\mathbf{J} - \mathbf{J}\mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0 = \mathbf{0}$ となります
+（$\mathbf{J}\mathbf{J}^{\dagger}\mathbf{J} = \mathbf{J}$ は擬似逆行列の性質）。
+射影された成分 $\mathbf{N}\dot{\mathbf{q}}_0$ は完全に零空間に含まれ、主タスクに影響を与えません。
 
 この零空間を用いて副次的な目標を追加できます:
 
