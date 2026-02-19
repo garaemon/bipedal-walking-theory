@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { ZMPConceptDiagram, ZMPSupportPolygonDiagram } from "@/components/diagrams/ZMPDiagram";
+import { ZMPStabilityDiagram } from "@/components/diagrams/ZMPStabilityDiagram";
 
 # ゼロモーメントポイント (ZMP)
 
@@ -13,6 +14,16 @@ import { ZMPConceptDiagram, ZMPSupportPolygonDiagram } from "@/components/diagra
 
 **ゼロモーメントポイント**は、すべての活性力（重力と慣性力）の合モーメントの
 水平成分がゼロとなる地面上の点です。
+
+### 第一原理からの導出
+
+ZMP公式の由来を理解するために、地面上の点 $P = (p_x, 0, 0)$ を考えます。位置 $(x_i, y_i, z_i)$ にある各質量 $m_i$ には、重力 $-m_i g \hat{z}$ と慣性力 $-m_i \mathbf{a}_i$（ダランベールの原理）の2つの力が作用します。点 $P$ まわりのこれらの力のモーメントは:
+
+$$
+\boldsymbol{\tau}_P = \sum_{i=1}^{n} (\mathbf{r}_i - \mathbf{r}_P) \times (-m_i g \hat{z} - m_i \mathbf{a}_i)
+$$
+
+ZMPは、このモーメントの**水平成分**が消える点 $P$ として定義されます。$\tau_{P,y} = 0$（$y$ 軸まわりのモーメント）を設定し $p_x$ について解くと、ZMP公式が得られます。
 
 $n$ 個の質点からなるシステムにおいて、ZMPの位置は:
 
@@ -58,6 +69,8 @@ $$
 
 ZMPが支持多角形の端に達すると、ロボットは転倒し始めます。
 これは歩行パターン生成で使用される基本的な拘束条件です。
+
+<ZMPStabilityDiagram />
 
 ## ZMP vs CoP vs CoG
 
@@ -115,8 +128,7 @@ $$
 p_x^{zmp} = \frac{\sum_{i=1}^{N} m_i(g + \ddot{z}_{G_i})x_{G_i} - \sum_{i=1}^{N}(m_i \ddot{x}_{G_i} z_{G_i} + I_{iy}\ddot{\theta}_{iy})}{\sum_{i=1}^{N} m_i(g + \ddot{z}_{G_i})}
 $$
 
-ここで、$(x_{G_i}, z_{G_i})$ はリンク $i$ の重心、$I_{iy}$ は $y$ 軸まわりの慣性モーメント、
-$\ddot{\theta}_{iy}$ は角加速度です。
+ここで、$(x_{G_i}, z_{G_i})$ はリンク $i$ の重心、$I_{iy}$ は $y$ 軸まわりの慣性モーメント、$\ddot{\theta}_{iy}$ は角加速度です。$I_{iy}\ddot{\theta}_{iy}$ の項は各リンクの**角運動量の寄与**を表します。リンクが回転すると（例: 腕の振り）、その角運動量の変化率が地面接触点まわりのモーメントを生成し、質点モデルの予測からZMPをずらします。低速歩行ではこれらの角運動量項は小さく無視できますが（より単純な質点ZMP公式が得られる）、走行やキック動作のような動的な運動では重要になります。
 
 ## ZMPに基づく歩行パターン生成
 

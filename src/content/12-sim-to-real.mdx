@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { SimToRealPipelineDiagram } from "@/components/diagrams/SimToRealDiagram";
+import { TeacherStudentDiagram } from "@/components/diagrams/TeacherStudentDiagram";
 
 # Sim-to-Real Transfer
 
@@ -123,6 +124,53 @@ print("A robust policy must handle all these variations!")
 `}
 />
 
+## Why Domain Randomization Works
+
+Why does randomizing parameters lead to a more robust policy? The key insight
+is that the policy no longer optimizes for a single environment. Instead, it
+optimizes the **expected performance across a distribution** of environments:
+
+$$
+\pi^* = \arg\max_\pi \; \mathbb{E}_{\xi \sim P(\xi)}[J(\pi, \xi)]
+$$
+
+where $J(\pi, \xi)$ is the return (cumulative reward) of policy $\pi$ in
+environment parameterized by $\xi$, and $P(\xi)$ is the randomization
+distribution.
+
+By maximizing the average performance over many different environments, the
+policy is forced to discover strategies that are **generally effective** rather
+than exploiting quirks of any single simulation setup. Think of it like
+learning to drive: if you only practice on dry, sunny roads, you may fail in
+rain or snow. Training across rain, snow, and sunshine produces a driver who
+handles all conditions reasonably well.
+
+## Failure Modes and Trade-offs
+
+Domain randomization requires careful tuning. Two main failure modes exist:
+
+- **Over-conservative behavior**: If the randomization range is too wide,
+  the policy must hedge against extreme scenarios. This often produces slow,
+  overly cautious walking because the policy cannot commit to aggressive
+  strategies that might fail in some corner of the parameter space.
+
+- **Under-randomization**: If the range is too narrow, the policy may
+  overfit to simulation-specific features (e.g., perfectly flat ground,
+  zero sensor delay) that do not exist on the real robot. The resulting
+  policy fails when encountering real-world conditions outside its
+  training distribution.
+
+**Practical guidelines** for setting randomization ranges:
+
+1. **Start with physical tolerances**: Set mass ranges within manufacturing
+   tolerance (e.g., $\pm 5\%$), friction within measured floor ranges.
+2. **Randomize uncertain parameters more**: Parameters that are hard to
+   measure accurately (friction coefficients, damping ratios, contact
+   stiffness) should have wider ranges than well-characterized ones
+   (link masses, geometry).
+3. **Iterate based on transfer results**: Deploy to the real robot, observe
+   failures, and widen the relevant randomization ranges.
+
 ## System Identification
 
 Rather than randomizing everything, **system identification** measures
@@ -138,6 +186,34 @@ $$
 
 where $\hat{\xi}$ is the parameter estimate, $y_k$ is the measured output,
 and $K_k$ is the adaptation gain.
+
+## Teacher-Student Training
+
+A widely used approach for sim-to-real transfer is **teacher-student
+distillation**. The idea is to separate what the policy needs to *know*
+from what it can actually *observe* on the real robot.
+
+<TeacherStudentDiagram />
+
+**Phase 1 (Teacher training)**: A teacher network is trained in simulation
+with access to **privileged information** — ground-truth values of friction,
+mass, terrain shape, and contact forces that are available inside the
+simulator but impossible to measure on a real robot. Because the teacher
+sees everything, it can learn a near-optimal policy.
+
+**Phase 2 (Student distillation)**: A student network receives only the
+**observations available on the real robot** (joint encoders, IMU, commanded
+actions). It is trained via supervised learning to mimic the teacher's
+actions. The loss function is simply:
+
+$$
+\mathcal{L} = \mathbb{E}\left[\|\pi_S(s) - \pi_T(s, \text{priv})\|^2\right]
+$$
+
+The student implicitly learns to infer the missing privileged information
+from the patterns in its observable inputs. For example, if friction is low
+the robot slides more, and the student learns to recognize that sliding
+pattern and respond like the teacher would.
 
 ## Rapid Motor Adaptation (RMA)
 
@@ -155,6 +231,36 @@ During training (simulation):
 During deployment (real robot):
 - Adaptation module estimates $z$ online from sensor data
 - Base policy acts using estimated $z$
+
+### How RMA Works in Detail
+
+The adaptation module takes a **history of recent observations** — typically
+the last $H = 50$ timesteps of joint positions, velocities, and commanded
+actions. From this temporal window, it implicitly estimates the current
+environment parameters (friction, mass distribution, terrain slope).
+
+The output is an **environment encoding** vector $z \in \mathbb{R}^d$
+(typically $d = 8$ to $32$), which is concatenated with the current
+observation $s_t$ before being fed into the base policy:
+
+$$
+a_t = \pi(s_t, \hat{z}_t), \quad \hat{z}_t = f_\phi(s_{t-H}, \ldots, s_t)
+$$
+
+The adaptation module $f_\phi$ is trained with a regression loss to match
+the privileged environment encoding $z^*$ that the teacher computes from
+ground-truth parameters:
+
+$$
+\mathcal{L}_\text{adapt} = \mathbb{E}\left[\|\hat{z}_t - z^*\|^2\right]
+$$
+
+**Why does history contain environment information?** Because the robot's
+response to the same commanded action differs depending on the physical
+parameters. On a slippery floor, the foot slides when pushing off; with
+a heavier payload, accelerations are smaller for the same torques. The
+adaptation module learns to read these signatures from the observation
+history.
 
 <CodeEditor
   initialCode={`import math
@@ -221,6 +327,40 @@ print("  - Weaker motors -> conservative gait")
 `}
 />
 
+## Practical Deployment
+
+### Contact Modeling
+
+Contact modeling is the single biggest source of the sim-to-real gap. Real
+contact involves soft deformable materials, complex foot geometries, and
+surface irregularities that are extremely difficult to simulate faithfully.
+Most simulators use rigid-body contact with simplified friction cones,
+which diverges from reality especially during heel-strike and toe-off phases.
+
+### Actuator Modeling
+
+Real motors have characteristics that are hard to capture in simulation:
+thermal effects (motors weaken as they heat up), nonlinear friction
+(stiction, Coulomb friction, viscous damping), communication delays between
+the controller and motor drivers, and current/torque limits that vary with
+speed. These effects compound during dynamic locomotion.
+
+### Sensor Noise and Latency
+
+Real IMUs have gyroscope drift, accelerometer bias, and magnetometer
+interference. Joint encoders have quantization noise. All sensor readings
+arrive with latency (typically 1-10 ms). Training with simulated sensor
+noise and delays is essential, but matching the real noise characteristics
+exactly is difficult.
+
+### Engineering Effort
+
+Building a simulation environment that transfers well to a specific robot
+typically requires significant engineering effort — often several months
+for a new platform. This includes careful CAD-to-URDF conversion, actuator
+model tuning, sensor noise characterization, and iterative refinement based
+on real-robot experiments.
+
 ## Key Results in Sim-to-Real Walking
 
 | Year | System | Method | Achievement |
@@ -230,11 +370,27 @@ print("  - Weaker motors -> conservative gait")
 | 2023 | Digit | RMA | Multi-terrain |
 | 2024 | Various | Large-scale RL | Agile humanoid locomotion |
 
+## Connections to Other Chapters
+
+- **Reinforcement Learning (Ch 11)**: Sim-to-real transfer is almost always
+  used with RL-trained policies. The techniques in this chapter (domain
+  randomization, teacher-student, RMA) are the standard methods for
+  deploying RL locomotion policies on real hardware.
+- **System identification vs. domain randomization**: Traditional robotics
+  relies on careful system identification to build accurate models.
+  Modern RL-based approaches use domain randomization instead, trading
+  model accuracy for policy robustness.
+- **Model Predictive Control (Ch 10)**: MPC-based approaches avoid much of
+  the sim-to-real gap because they re-plan online using a model that can
+  be updated with real-time state estimation. However, MPC is limited to
+  simpler dynamics models and shorter horizons compared to learned policies.
+
 ## References
 
 - J. Tobin et al., "[Domain Randomization for Transferring Deep Neural Networks from Simulation to the Real World](https://arxiv.org/abs/1703.06907)," *Proc. IROS*, 2017.
 - I. Radosavovic et al., "[Real-World Humanoid Locomotion with Reinforcement Learning](https://arxiv.org/abs/2303.03381)," *Science Robotics*, 2024.
 - A. Kumar et al., "[RMA: Rapid Motor Adaptation for Legged Robots](https://arxiv.org/abs/2107.04034)," *RSS*, 2021.
+- J. Lee et al., "[Learning Quadrupedal Locomotion over Challenging Terrain](https://arxiv.org/abs/2010.11251)," *Science Robotics*, 2020.
 
 <InteractiveDemo title="Domain Randomization Visualization">
   <p className="text-sm text-gray-500">

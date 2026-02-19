@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { MPCHorizonDiagram } from "@/components/diagrams/MPCDiagram";
+import { MPCConstraintDiagram } from "@/components/diagrams/MPCConstraintDiagram";
 
 # Model Predictive Control (MPC)
 
@@ -24,6 +25,24 @@ subject to:
 Apply only the first input $u_0^*$, then re-solve at the next step.
 
 <MPCHorizonDiagram />
+
+### Why Receding Horizon?
+
+Why not solve one long-horizon problem at the start and execute the entire plan open-loop?
+There are three key reasons:
+
+1. **Model mismatch**: The LIPM is a simplification. The real robot has flexible joints,
+   unmodeled friction, and other dynamics the model ignores. Small errors accumulate
+   over time.
+2. **Disturbances**: External pushes, uneven terrain, or slippery surfaces cannot be
+   predicted in advance. Re-solving incorporates the measured state as feedback.
+3. **Changing objectives**: The desired footstep plan may change mid-walk (e.g., an
+   obstacle appears, or a human gives a new goal). MPC naturally adapts because it
+   replans from the current state.
+
+By re-solving at each time step with the latest measured state, MPC continuously
+corrects for all of these issues. Think of it like a GPS that recalculates your
+route every few seconds, rather than computing it once at the start of your trip.
 
 ## Linear MPC with LIPM
 
@@ -51,11 +70,103 @@ subject to $A_{ineq}\mathbf{U} \leq \mathbf{b}_{ineq}$
 
 where $\mathbf{U} = [u_0, u_1, \ldots, u_{N-1}]^T$ is the stacked control input.
 
+### Constructing the QP from State-Space Model
+
+To obtain the matrices $H$ and $\mathbf{f}$ concretely, we "unroll" the dynamics
+over the prediction horizon of $N$ steps.
+
+**Step 1: Stack the dynamics.**
+Starting from $\mathbf{x}_0$, we can write all future states as a function of
+the initial state and the control sequence:
+
+$$
+\mathbf{X} = \Phi \mathbf{x}_0 + \Gamma \mathbf{U}
+$$
+
+where $\mathbf{X} = [\mathbf{x}_1, \mathbf{x}_2, \ldots, \mathbf{x}_N]^T$ is the
+stacked state vector, and
+
+$$
+\Phi = \begin{bmatrix} A \\ A^2 \\ \vdots \\ A^N \end{bmatrix}, \quad
+\Gamma = \begin{bmatrix}
+B & 0 & \cdots & 0 \\
+AB & B & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+A^{N-1}B & A^{N-2}B & \cdots & B
+\end{bmatrix}
+$$
+
+$\Phi$ propagates the initial state forward, and $\Gamma$ is a lower-triangular
+matrix that maps control inputs to future states.
+
+**Step 2: Predict ZMP trajectory.**
+The ZMP at each step is $p_i = C \mathbf{x}_i$. Stacking all ZMP predictions:
+
+$$
+\mathbf{P} = \bar{C} \mathbf{X} = \bar{C} \Phi \mathbf{x}_0 + \bar{C} \Gamma \mathbf{U}
+$$
+
+where $\bar{C} = \text{diag}(C, C, \ldots, C)$ is a block-diagonal matrix.
+
+**Step 3: Form the cost function.**
+The ZMP tracking cost is:
+
+$$
+J = (\mathbf{P} - \mathbf{P}_{ref})^T Q (\mathbf{P} - \mathbf{P}_{ref}) + \mathbf{U}^T R \mathbf{U}
+$$
+
+Expanding this and collecting terms in $\mathbf{U}$:
+
+$$
+H = \Gamma^T \bar{C}^T Q \bar{C} \Gamma + R
+$$
+
+$$
+\mathbf{f} = \Gamma^T \bar{C}^T Q (\bar{C} \Phi \mathbf{x}_0 - \mathbf{P}_{ref})
+$$
+
+**Small example (N=3):** With a sampling period $T = 0.1$ s, each column
+of $\Gamma$ contains the influence of one control input on all future states.
+For instance, $u_0$ affects $\mathbf{x}_1$ through $B$, $\mathbf{x}_2$ through
+$AB$, and $\mathbf{x}_3$ through $A^2B$. Meanwhile $u_2$ only affects
+$\mathbf{x}_3$ through $B$. This lower-triangular structure is key:
+earlier control inputs have more influence on the predicted trajectory than
+later ones.
+
+## MPC vs. LQR vs. Preview Control
+
+Understanding how MPC relates to other controllers from earlier chapters
+clarifies when to use each method.
+
+- **LQR** (Chapter 4) is a special case: it is equivalent to infinite-horizon MPC
+  with no constraints. LQR produces a fixed gain matrix $K$ computed offline,
+  so there is no online optimization.
+- **Preview control** (Chapter 5) is another special case: infinite-horizon with a
+  preview window of future references, but still no inequality constraints.
+- **MPC's key advantage is constraints.** It can explicitly enforce that the ZMP stays
+  inside the support polygon, that step lengths are bounded, etc.
+- When no constraints are active, MPC and LQR produce nearly identical control
+  inputs. The constraint handling is what makes MPC worth the extra computation.
+
+| Feature | Preview Control | MPC |
+|---|---|---|
+| Constraints | No | Yes |
+| Computation | Offline gain matrices | Online QP at each step |
+| Optimality | Infinite horizon | Finite horizon (N steps) |
+| Reactivity | Limited (fixed gains) | High (replanning each step) |
+| Footstep modification | Cannot change online | Can adapt footsteps online |
+
 <CodeEditor
   initialCode={`import math
 
 # Simple Linear MPC for LIPM walking
-# Using a basic gradient descent solver (for demonstration)
+# Using unconstrained gradient descent (for demonstration only).
+#
+# Note: This simplified example uses unconstrained gradient descent
+# for illustration. In practice, walking MPC uses dedicated QP solvers
+# (qpOASES, OSQP, Clarabel) that handle inequality constraints
+# efficiently. Typical computation times are 0.1-5 ms per solve,
+# allowing control at 100-1000 Hz.
 
 g = 9.81
 z_c = 0.8
@@ -151,19 +262,30 @@ for k in range(sim_steps):
 
 A key advantage of MPC over preview control is explicit **constraint handling**:
 
+<MPCConstraintDiagram />
+
 ### ZMP Constraints
+
 $$
 p_{x,min} \leq C\mathbf{x}_i \leq p_{x,max}
 $$
 
-The bounds change with footstep timing (support polygon).
+The bounds change with footstep timing (support polygon). These constraints
+are expressed as linear inequalities on $\mathbf{U}$ via the prediction matrices:
+
+$$
+\bar{C}\Gamma \mathbf{U} \leq \mathbf{b}_{max} - \bar{C}\Phi \mathbf{x}_0, \quad
+-\bar{C}\Gamma \mathbf{U} \leq -\mathbf{b}_{min} + \bar{C}\Phi \mathbf{x}_0
+$$
 
 ### Kinematic Constraints
+
 - Maximum step length
 - Foot clearance height
 - Joint angle limits
 
 ### Timing Adaptation
+
 MPC can optimize **when** to take steps, not just the CoM trajectory.
 This enables reactive stepping in response to pushes.
 
@@ -186,12 +308,27 @@ Nonlinear MPC is computationally expensive but handles:
 
 ## Real-Time Considerations
 
-Walking MPC must solve within the control loop (~1-10 ms). Strategies:
+Walking MPC must solve within the control loop (~1-10 ms). The following
+strategies make this possible:
 
-1. **Warm starting**: use previous solution as initial guess
-2. **Early termination**: accept suboptimal solutions after fixed iterations
-3. **Condensed formulation**: eliminate states to reduce problem size
-4. **Tailored solvers**: exploit sparsity structure of walking QPs
+1. **Warm starting**: Use the previous solution shifted by one step as the initial
+   guess for the current QP. Since the problem changes only slightly between
+   consecutive time steps, the shifted solution is already close to optimal.
+   This dramatically reduces the number of iterations the solver needs.
+
+2. **Early termination**: Accept a suboptimal solution after a fixed number of
+   iterations. For walking, a slightly suboptimal control input applied on time
+   is far better than the mathematically optimal input that arrives too late.
+
+3. **Condensed formulation**: Substitute the dynamics constraints to eliminate
+   all state variables, reducing the QP to a smaller problem in $\mathbf{U}$ only.
+   This is exactly the $H$, $\mathbf{f}$ formulation derived above. The trade-off
+   is a dense (but smaller) QP versus a sparse (but larger) one.
+
+4. **Tailored solvers**: Walking QPs have banded structure because each state
+   depends only on the previous state. Solvers that exploit this sparsity
+   (e.g., HPIPM) achieve $O(N)$ complexity per iteration instead of $O(N^3)$,
+   making long horizons tractable.
 
 ## References
 

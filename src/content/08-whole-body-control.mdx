@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { TaskPriorityDiagram } from "@/components/diagrams/WholeBodyControlDiagram";
+import { NullSpaceDiagram } from "@/components/diagrams/NullSpaceDiagram";
 
 # Whole-Body Motion Control
 
@@ -30,8 +31,22 @@ $$
 
 where $\mathbf{J} = \frac{\partial f}{\partial \mathbf{q}} \in \mathbb{R}^{m \times n}$.
 
-For a humanoid robot, the Jacobian maps joint velocities to CoM velocity,
-foot velocity, hand velocity, etc.
+**Example: 2-link planar arm.** For a 2-link arm with link lengths
+$l_1, l_2$ and joint angles $q_1, q_2$, the forward kinematics is
+$x = l_1 \cos q_1 + l_2 \cos(q_1 + q_2)$,
+$y = l_1 \sin q_1 + l_2 \sin(q_1 + q_2)$.
+Differentiating each output with respect to each joint angle yields:
+
+$$
+\mathbf{J} = \begin{bmatrix}
+-l_1 \sin q_1 - l_2 \sin(q_1+q_2) & -l_2 \sin(q_1+q_2) \\
+l_1 \cos q_1 + l_2 \cos(q_1+q_2) & l_2 \cos(q_1+q_2)
+\end{bmatrix}
+$$
+
+Each column shows how one joint velocity contributes to the end-effector
+velocity. For a humanoid robot, the Jacobian maps joint velocities to CoM
+velocity, foot velocity, hand velocity, etc.
 
 ## Inverse Kinematics
 
@@ -41,22 +56,61 @@ $$
 \dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des}
 $$
 
-where $\mathbf{J}^{\dagger}$ is the pseudoinverse of the Jacobian.
+where $\mathbf{J}^{\dagger}$ is the **Moore-Penrose pseudoinverse**. For
+a "fat" matrix ($n > m$, more joints than task dimensions), it is:
+
+$$
+\mathbf{J}^{\dagger} = \mathbf{J}^T(\mathbf{J}\mathbf{J}^T)^{-1}
+$$
+
+The pseudoinverse gives the **minimum-norm** joint velocity that achieves
+the desired task-space velocity. When $n = m$ and $\mathbf{J}$ is
+invertible, $\mathbf{J}^{\dagger} = \mathbf{J}^{-1}$.
+
+### Singularity Handling
+
+At a **singularity**, $\mathbf{J}$ loses rank (e.g., a 2-link arm fully
+extended). The pseudoinverse produces extremely large joint velocities
+near singularities. The **damped least-squares** (DLS) method addresses
+this:
+
+$$
+\mathbf{J}^{\dagger}_{DLS} = \mathbf{J}^T(\mathbf{J}\mathbf{J}^T + \lambda^2 \mathbf{I})^{-1}
+$$
+
+The damping factor $\lambda > 0$ trades off tracking accuracy for
+bounded joint velocities near singular configurations.
 
 When the robot has more joints than task dimensions ($n > m$), the system is
-**redundant** and the pseudoinverse gives the minimum-norm solution.
+**redundant** and the pseudoinverse gives one particular solution. The
+remaining freedom is used through the null space.
 
 ### Null Space
 
 The null space of $\mathbf{J}$ represents motions that do not affect the
-task-space output. We can add secondary objectives:
+task-space output. Geometrically, the null space is the set of all joint
+velocity directions $\dot{\mathbf{q}}$ for which
+$\mathbf{J}\dot{\mathbf{q}} = \mathbf{0}$ — the robot moves internally
+without changing the task-space output.
+
+The matrix $\mathbf{N} = \mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J}$
+is a **projector** onto the null space. To see why: if
+$\dot{\mathbf{q}}_0$ is any joint velocity, then
+$\mathbf{J}(\mathbf{N}\dot{\mathbf{q}}_0) = (\mathbf{J} - \mathbf{J}\mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0 = \mathbf{0}$
+because $\mathbf{J}\mathbf{J}^{\dagger}\mathbf{J} = \mathbf{J}$
+(a property of the pseudoinverse). So the projected component
+$\mathbf{N}\dot{\mathbf{q}}_0$ lies entirely in the null space and
+cannot affect the primary task.
+
+We can add secondary objectives using this null space:
 
 $$
 \dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des} + (\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0
 $$
 
-where $\dot{\mathbf{q}}_0$ is an arbitrary joint velocity for the secondary task,
-projected onto the null space by $(\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})$.
+where $\dot{\mathbf{q}}_0$ is an arbitrary joint velocity for the secondary task.
+
+<NullSpaceDiagram />
 
 ## Task-Priority Framework
 

@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { PassiveWalkerDiagram, PoincareDiagram } from "@/components/diagrams/PassiveWalkerDiagram";
+import { PassiveWalkerAnimationDiagram } from "@/components/diagrams/PassiveWalkerAnimationDiagram";
 
 # 受動歩行
 
@@ -21,12 +22,14 @@ McGeerは、単純な二脚機構が重力のみを使って安定して斜面�
 
 <PassiveWalkerDiagram />
 
+<PassiveWalkerAnimationDiagram />
+
 ## ハイブリッド力学系
 
 受動歩行は**ハイブリッド力学系**です。以下の要素を組み合わせます:
 
 1. **連続力学**（遊脚期）: 微分方程式により支配される
-2. **離散イベント**（踵接地）: 瞬間的な速度変化
+1. **離散イベント**（踵接地）: 瞬間的な速度変化
 
 ### 遊脚期の力学
 
@@ -49,7 +52,10 @@ $$
 \ddot{\theta}_{sw} = \ddot{\theta}_{st} + \dot{\theta}_{st}^2 \sin(\theta_{sw}) - \cos(\theta_{st} - \gamma)\sin(\theta_{sw})
 $$
 
-（角度は斜面法線から測定、$g/l$ で正規化。）
+> **正規化について:** 上記の方程式は $g/l = 1$、$m_H/m = 1$ と設定して正規化されています。
+> これは時間が $\sqrt{l/g}$ の単位で、角度がラジアンで測定されることを意味します。
+> 正規化により自由パラメータの数が減少し、傾斜角 $\gamma$ と質量比のみで
+> ダイナミクスを議論できるようになります。
 
 ### 踵接地 (衝撃マップ)
 
@@ -67,6 +73,54 @@ H = \begin{bmatrix} \cos(2\alpha) & 0 \\ \cos(2\alpha)(1 - \cos(2\alpha)) & 0 \e
 $$
 
 衝撃時の脚間角度が $2\alpha$ の対称歩行器の場合。
+
+### 衝撃遷移行列の導出
+
+衝撃遷移行列 $H$ は**角運動量保存則**から導出されます。
+物理的な推論を段階的に説明します:
+
+1. **衝撃直前**、遊脚が地面に接触します。これにより新しい接触点に
+   撃力的な地面反力が発生します。
+1. **撃力は新しい接触点を通過する**ため、その点まわりのモーメントはゼロです。
+   したがって、**新しい接触点まわりの角運動量は衝撃の前後で保存**されます。
+1. 新しい支持脚足まわりの衝撃前後の角運動量を書くと:
+
+$$
+H_{after}(\theta^-) \dot{\theta}^+ = H_{before}(\theta^-) \dot{\theta}^-
+$$
+
+衝撃後の速度を解くと $\dot{\theta}^+ = H_{after}^{-1} H_{before} \dot{\theta}^-$ となります。
+最も単純な質点コンパスゲート歩行器では慣性行列が簡略化され、
+$H_{after}^{-1} H_{before}$ の積が上に示した遷移行列 $H$ を与えます。
+
+重要な物理的帰結: **踵接地は常に運動エネルギーを減少させます**。
+これは新しい支持脚に垂直な速度成分が瞬間的に失われるためです
+（完全非弾性衝突と類似しています）。
+
+## 受動歩行におけるエネルギー収支
+
+斜面上の定常歩行では、優雅なエネルギー収支が成立します:
+斜面を降りることで得られるエネルギーが、各踵接地衝突で失われるエネルギーに
+**正確に等しく**なります。
+
+**1歩あたりの重力によるエネルギー獲得:**
+
+$$
+\Delta E_{gain} = m g \cdot d_{step} \cdot \sin(\gamma)
+$$
+
+ここで $d_{step}$ は歩幅、$\gamma$ は傾斜角です。
+
+**衝撃時の速度変化によるエネルギー損失:**
+
+$$
+\Delta E_{loss} = \frac{1}{2} m \left( v_{before}^2 - v_{after}^2 \right)
+$$
+
+周期歩行が存在するためには、$\Delta E_{gain} = \Delta E_{loss}$ が成り立つ必要があります。
+この条件により、与えられた傾斜角に対する定常歩行速度が一意に決まります。
+より急な斜面はより多くのエネルギーを供給し、
+各衝撃でより大きな衝突損失を伴うより速い歩行をもたらします。
 
 ## リミットサイクル
 
@@ -184,38 +238,50 @@ $$
 
 ## 分岐とカオス
 
-斜面角度 $\gamma$ が増加すると:
+斜面角度 $\gamma$ が増加すると、受動歩行器は**周期倍分岐**を示します。
+これは非線形力学系におけるカオスへの典型的な経路です。
 
-1. **小さな $\gamma$**: 安定な周期1歩行（1サイクルに1歩）
-2. **中程度の $\gamma$**: 周期倍分岐（周期2、周期4、...）
-3. **大きな $\gamma$**: カオス的歩行、その後転倒
+**物理的な意味:**
 
-この豊かな力学的振る舞いは、二足歩行を非線形力学とカオス理論に結びつけます。
+1. **小さな $\gamma$**: 歩行器は毎サイクル同一の歩を踏みます（周期1歩行）。
+   各歩の歩幅と速度は同じです。
+1. **中程度の $\gamma$**: 歩行器は2つの異なる歩パターンを交互に繰り返し始めます
+   -- 長い歩の後に短い歩が続きます（周期2歩行）。
+   さらに増加すると周期4になります: 4つの異なる歩が繰り返されます。
+1. **大きな $\gamma$**: 歩行器は不規則で繰り返しのない歩を踏みます（カオス的歩行）。
+   最終的にエネルギーが蓄積しすぎて転倒します。
+
+実際のコンパスゲート歩行器はこの周期倍分岐カスケードを正確に示すことが、
+Goswami et al. (1998) の数値シミュレーションで実証されています。
+以下のコードは**ロジスティック写像を類推として**用いてこの概念を説明します。
+ロジスティック写像 $x_{n+1} = r x_n (1 - x_n)$ は歩行器のポアンカレ写像そのものでは
+ありませんが、同じ定性的な分岐構造を示すため、教育的なツールとして有用です。
 
 <CodeEditor
   initialCode={`import math
 
-# Demonstrate period-doubling concept
-# Using a simple logistic-map analogy for the Poincare map
+# Demonstrate period-doubling using the logistic map as an ANALOGY.
+# The actual compass-gait Poincare map shows the same bifurcation
+# structure, but requires numerical ODE integration to compute.
 
-print("=== Bifurcation Behavior ===")
+print("=== Bifurcation Behavior (Logistic Map Analogy) ===")
 print()
-print("As slope increases, the gait transitions:")
+print("As slope increases, the walker gait transitions:")
 print("  Period-1 -> Period-2 -> Period-4 -> Chaos -> Falling")
 print()
 
-# Simplified model: map x_{n+1} = r * x_n * (1 - x_n)
-# r increases with slope angle
+# Logistic map: x_{n+1} = r * x_n * (1 - x_n)
+# Parameter r plays the role of slope angle gamma
 slopes = [
-    (0.02, 2.8, "Period-1 (stable)"),
-    (0.04, 3.2, "Period-2"),
-    (0.06, 3.5, "Period-4"),
-    (0.08, 3.9, "Chaos"),
+    (0.02, 2.8, "Period-1: every step is identical"),
+    (0.04, 3.2, "Period-2: alternating long/short steps"),
+    (0.06, 3.5, "Period-4: four-step repeating pattern"),
+    (0.08, 3.9, "Chaos: irregular, non-repeating steps"),
 ]
 
-for gamma_deg, r, label in slopes:
+for gamma_val, r, label in slopes:
     x = 0.5
-    # Run for 50 iterations to settle
+    # Run 50 iterations to reach the attractor
     for _ in range(50):
         x = r * x * (1 - x)
     # Collect next 8 iterations
@@ -225,7 +291,7 @@ for gamma_deg, r, label in slopes:
         values.append(x)
 
     unique = sorted(set(round(v, 4) for v in values))
-    print(f"Slope {gamma_deg:.2f} rad: {label}")
+    print(f"Slope ~{gamma_val:.2f} rad (r={r}): {label}")
     print(f"  Distinct states: {len(unique)}")
     print(f"  Values: {[f'{v:.4f}' for v in unique[:4]]}")
     print()
@@ -237,10 +303,24 @@ for gamma_deg, r, label in slopes:
 受動歩行は能動歩行器の設計に関する知見を提供します:
 
 1. **自然な力学の活用**: ロボットの自然な運動に逆らうのではなく、それと協調する制御器を設計する
-2. **最小限のアクチュエーション**: すべての関節を制御するのではなく、適切なタイミングで少量のエネルギーを加える（例: 足首の蹴り出し）
-3. **リミットサイクル安定性**: 安定な周期軌道として歩行パターンを設計する
+1. **最小限のアクチュエーション**: すべての関節を制御するのではなく、適切なタイミングで少量のエネルギーを加える（例: 足首の蹴り出し）
+1. **リミットサイクル安定性**: 安定な周期軌道として歩行パターンを設計する
 
 これらの原則は、CornellのRangerやDelftのFlameなどの効率的な歩行ロボットの開発に影響を与えました。
+
+### 他の章との関連
+
+- **ハイブリッド零力学 (第9章):** HZDは能動制御された歩行の安定性解析に
+  同じポアンカレ写像のフレームワークを使用します。
+  主な違いは、HZDがリミットサイクルを整形するためにフィードバック制御を追加するのに対し、
+  受動歩行器は完全に開ループダイナミクスに依存する点です。
+- **強化学習 (第11章):** RLベースの移動制御器は、受動歩行に類似した
+  エネルギー効率の高い歩行パターンを発見できます。
+  輸送コストの指標が受動歩行理論とRLの報酬設計を結びつけます。
+- **中枢パターン生成器 (第7章):** CPGは受動歩行器で観察されるリミットサイクル構造を
+  再現するリズミックな運動パターンを生成します。
+  両アプローチとも、安定な移動が周期的な振動ダイナミクスから創発するという
+  考えを共有しています。
 
 ## 参考文献
 

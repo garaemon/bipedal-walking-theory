@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { TaskPriorityDiagram } from "@/components/diagrams/WholeBodyControlDiagram";
+import { NullSpaceDiagram } from "@/components/diagrams/NullSpaceDiagram";
 
 # 全身運動制御
 
@@ -27,7 +28,16 @@ $$
 
 ここで $\mathbf{J} = \frac{\partial f}{\partial \mathbf{q}} \in \mathbb{R}^{m \times n}$ です。
 
-ヒューマノイドロボットにおいて、ヤコビアンは関節速度を重心速度、足速度、手速度などに写像します。
+**例: 2リンク平面アーム。** リンク長 $l_1, l_2$、関節角度 $q_1, q_2$ の2リンクアームの場合、順運動学は $x = l_1 \cos q_1 + l_2 \cos(q_1 + q_2)$, $y = l_1 \sin q_1 + l_2 \sin(q_1 + q_2)$ です。各出力を各関節角度で微分すると:
+
+$$
+\mathbf{J} = \begin{bmatrix}
+-l_1 \sin q_1 - l_2 \sin(q_1+q_2) & -l_2 \sin(q_1+q_2) \\
+l_1 \cos q_1 + l_2 \cos(q_1+q_2) & l_2 \cos(q_1+q_2)
+\end{bmatrix}
+$$
+
+各列は一つの関節速度がエンドエフェクタ速度にどう寄与するかを示します。ヒューマノイドロボットでは、ヤコビアンは関節速度を重心速度、足速度、手速度などに写像します。
 
 ## 逆運動学
 
@@ -37,19 +47,44 @@ $$
 \dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des}
 $$
 
-ここで $\mathbf{J}^{\dagger}$ はヤコビアンの擬似逆行列です。
+ここで $\mathbf{J}^{\dagger}$ は**ムーア・ペンローズ擬似逆行列**です。「太い」行列（$n > m$, 関節がタスク次元より多い場合）では:
 
-ロボットがタスク次元より多くの関節を持つ場合（$n > m$）、システムは**冗長**であり、擬似逆行列は最小ノルム解を与えます。
+$$
+\mathbf{J}^{\dagger} = \mathbf{J}^T(\mathbf{J}\mathbf{J}^T)^{-1}
+$$
+
+擬似逆行列は所望のタスク空間速度を達成する**最小ノルム**の関節速度を与えます。$n = m$ かつ $\mathbf{J}$ が正則な場合は $\mathbf{J}^{\dagger} = \mathbf{J}^{-1}$ です。
+
+### 特異点の取り扱い
+
+**特異点**では $\mathbf{J}$ がランク落ちします（例: 2リンクアームが完全に伸びた状態）。特異点近傍では擬似逆行列が極めて大きな関節速度を生成します。**減衰最小二乗法** (DLS) はこれに対処します:
+
+$$
+\mathbf{J}^{\dagger}_{DLS} = \mathbf{J}^T(\mathbf{J}\mathbf{J}^T + \lambda^2 \mathbf{I})^{-1}
+$$
+
+減衰係数 $\lambda > 0$ は追従精度と特異姿勢近傍での関節速度の有界性のトレードオフを制御します。
+
+ロボットがタスク次元より多くの関節を持つ場合（$n > m$）、システムは**冗長**であり、擬似逆行列は一つの特定の解を与えます。残りの自由度は零空間を通じて利用されます。
 
 ### 零空間
 
-$\mathbf{J}$ の零空間は、タスク空間出力に影響を与えない運動を表します。副次的な目標を追加できます:
+$\mathbf{J}$ の零空間は、タスク空間出力に影響を与えない運動を表します。幾何学的には、零空間とは $\mathbf{J}\dot{\mathbf{q}} = \mathbf{0}$ となるすべての関節速度方向の集合です。ロボットはタスク空間出力を変えずに内部的に動くことができます。
+
+行列 $\mathbf{N} = \mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J}$ は零空間への**射影子**です。
+任意の関節速度 $\dot{\mathbf{q}}_0$ に対して $\mathbf{J}(\mathbf{N}\dot{\mathbf{q}}_0) = (\mathbf{J} - \mathbf{J}\mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0 = \mathbf{0}$ となります
+（$\mathbf{J}\mathbf{J}^{\dagger}\mathbf{J} = \mathbf{J}$ は擬似逆行列の性質）。
+射影された成分 $\mathbf{N}\dot{\mathbf{q}}_0$ は完全に零空間に含まれ、主タスクに影響を与えません。
+
+この零空間を用いて副次的な目標を追加できます:
 
 $$
 \dot{\mathbf{q}} = \mathbf{J}^{\dagger}\dot{\mathbf{x}}_{des} + (\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})\dot{\mathbf{q}}_0
 $$
 
-ここで $\dot{\mathbf{q}}_0$ は副次タスクのための任意の関節速度であり、$(\mathbf{I} - \mathbf{J}^{\dagger}\mathbf{J})$ により零空間に射影されます。
+ここで $\dot{\mathbf{q}}_0$ は副次タスクのための任意の関節速度です。
+
+<NullSpaceDiagram />
 
 ## タスク優先度フレームワーク
 

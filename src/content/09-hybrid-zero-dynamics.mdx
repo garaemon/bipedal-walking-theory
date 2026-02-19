@@ -2,12 +2,38 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { VirtualConstraintDiagram } from "@/components/diagrams/HZDDiagram";
+import { HybridAutomatonDiagram } from "@/components/diagrams/HybridAutomatonDiagram";
+import { ZeroDynamicsSurfaceDiagram } from "@/components/diagrams/ZeroDynamicsSurfaceDiagram";
+import { VirtualVsPhysicalConstraintDiagram } from "@/components/diagrams/VirtualVsPhysicalConstraintDiagram";
 
 # Hybrid Zero Dynamics
 
 Hybrid Zero Dynamics (HZD) provides a rigorous mathematical framework for
 designing provably stable walking gaits. Unlike heuristic approaches, HZD
 guarantees orbital stability through carefully designed virtual constraints.
+
+## Why HZD? The Problem with Trajectory Tracking
+
+Traditional walking controllers rely on **time-based trajectory tracking**:
+they prescribe that "at time $t = 0.3$ s, the knee should be at 30 degrees."
+This works well on flat ground with no disturbances, but has a fundamental flaw.
+
+Imagine the robot is pushed backward mid-step and slows down. A time-based
+controller still demands the same knee angle at $t = 0.3$ s, even though the
+robot has not progressed far enough in its step. The result: the commanded
+trajectory no longer matches the physical state of the robot, often leading
+to a fall.
+
+HZD takes a fundamentally different approach: instead of parameterizing
+trajectories by time, it parameterizes them by a **phase variable**
+$\theta(\mathbf{q})$, which measures how far the robot has progressed
+through the current step. If the robot is pushed and slows down, the phase
+progresses more slowly, and the desired joint trajectory automatically
+slows down with it.
+
+This **phase-based parameterization** gives HZD inherent robustness to
+timing perturbations, which is one of its most important practical
+advantages.
 
 ## Virtual Constraints
 
@@ -23,6 +49,8 @@ where $h(\mathbf{q})$ selects the controlled outputs and $h_d(\theta)$
 defines the desired output as a function of the phase variable.
 
 <VirtualConstraintDiagram />
+
+<VirtualVsPhysicalConstraintDiagram />
 
 ### Phase Variable
 
@@ -43,17 +71,53 @@ $$
 where $s = \frac{\theta - \theta^+}{\theta^- - \theta^+} \in [0, 1]$
 normalizes the phase, and $\alpha_k$ are the Bezier coefficients to be optimized.
 
+### Why Bezier Polynomials?
+
+Bezier polynomials are chosen over other possible basis functions (Fourier
+series, cubic splines, etc.) because of several useful properties:
+
+1. **Smoothness**: Bezier curves are $C^\infty$ continuous, ensuring that the
+   resulting joint velocities and accelerations are smooth. This is critical
+   for avoiding torque spikes on real hardware.
+2. **Convex hull property**: the curve is guaranteed to stay within the convex
+   hull of its control points $\alpha_k$. This makes it easy to enforce bounds
+   on joint angles during optimization.
+3. **Simple derivatives**: the derivative of an $M$-th order Bezier curve is
+   an $(M-1)$-th order Bezier curve with coefficients
+   $M(\alpha_{k+1} - \alpha_k)$. This simplifies analytical velocity and
+   acceleration computation.
+4. **Endpoint interpolation**: $h_d(s=0) = \alpha_0$ and
+   $h_d(s=1) = \alpha_M$ exactly, giving direct control over the start
+   and end values of the trajectory.
+
 ## Hybrid System Model
 
-Walking is modeled as a hybrid system with:
+Walking is modeled as a **hybrid system** that alternates between continuous
+dynamics and discrete events. The following diagram illustrates this cycle:
+
+<HybridAutomatonDiagram />
 
 ### Continuous Phase (Swing)
+
+During the swing phase, the robot is a multi-body system governed by
+the manipulator equation:
+
+$$
+M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{h}(\mathbf{q}, \dot{\mathbf{q}}) = B\mathbf{u}
+$$
+
+where $M(\mathbf{q})$ is the mass-inertia matrix, $\mathbf{h}$ contains
+Coriolis, centrifugal, and gravity terms, $B$ is the input mapping matrix,
+and $\mathbf{u}$ is the vector of joint torques. In state-space form:
 
 $$
 \dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}
 $$
 
 where $\mathbf{x} = [\mathbf{q}^T, \dot{\mathbf{q}}^T]^T$ is the full state.
+
+Note that bipedal walkers are **underactuated**: the stance foot has no
+motor, so $B$ has fewer columns than $\mathbf{q}$ has rows.
 
 ### Discrete Phase (Impact)
 
@@ -63,16 +127,109 @@ $$
 \mathbf{x}^+ = \Delta(\mathbf{x}^-)
 $$
 
-The impact map $\Delta$ captures the instantaneous velocity change and
-leg relabeling at ground contact.
+### Impact Map and Leg Relabeling
+
+The impact map $\Delta$ captures two simultaneous effects:
+
+**Velocity jump.** The ground exerts an impulsive force at the contact
+point, causing an instantaneous change in joint velocities. Angular
+momentum about the new contact point is conserved because the impulsive
+ground reaction force passes through it. This yields:
+
+$$
+\dot{\mathbf{q}}^+ = H_{\text{impact}}(\mathbf{q}^-) \, \dot{\mathbf{q}}^-
+$$
+
+The matrix $H_{\text{impact}}$ depends only on the configuration at impact
+(not on velocities), so the velocity map is linear in $\dot{\mathbf{q}}^-$.
+
+**Leg relabeling.** The swing leg becomes the new stance leg and vice
+versa. The joint coordinates are reindexed: what was $q_{\text{swing}}$
+becomes $q_{\text{stance}}$, and what was $q_{\text{stance}}$ becomes
+$q_{\text{swing}}$. This relabeling is represented by a permutation
+matrix $R$:
+
+$$
+\mathbf{q}^+ = R \, \mathbf{q}^-
+$$
 
 ## Zero Dynamics
 
 When the virtual constraints are perfectly enforced ($y = 0, \dot{y} = 0$),
 the system evolves on a lower-dimensional **zero dynamics surface**.
 
-The zero dynamics describe the remaining uncontrolled degree of freedom
-(typically the stance leg angle). They take the form:
+### Deriving the Zero Dynamics
+
+To understand how the zero dynamics arise, consider the control design
+step by step.
+
+**Step 1: Define the output.** We define virtual constraint outputs:
+
+$$
+y = h_d(\mathbf{q}) - h_a(\mathbf{q}, s)
+$$
+
+where $h_d(\mathbf{q})$ selects the actual joint values (controlled outputs)
+and $h_a(\mathbf{q}, s)$ is the desired trajectory parameterized by the
+phase variable $s = s(\theta(\mathbf{q}))$.
+
+**Step 2: Input-output linearization.** Differentiate $y$ twice with respect
+to time. To express these derivatives compactly, we use **Lie derivative**
+notation from nonlinear control theory.
+
+**Lie derivative definition.** For a scalar function $h(\mathbf{x})$ and a
+vector field $f(\mathbf{x})$, the Lie derivative of $h$ along $f$ is
+defined as the directional derivative of $h$ in the direction of $f$:
+
+$$
+L_f h(\mathbf{x}) = \frac{\partial h}{\partial \mathbf{x}} f(\mathbf{x}) = \nabla h \cdot f
+$$
+
+Intuitively, $L_f h$ measures **how fast $h$ changes as the state flows
+along $f$**. If $\dot{\mathbf{x}} = f(\mathbf{x})$, then
+$\frac{d}{dt}h(\mathbf{x}) = L_f h(\mathbf{x})$.
+
+Higher-order Lie derivatives are obtained by repeated application:
+
+$$
+L_f^2 h = L_f(L_f h) = \frac{\partial (L_f h)}{\partial \mathbf{x}} f(\mathbf{x})
+$$
+
+For control-affine systems $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$,
+the mixed Lie derivative $L_g L_f h$ captures the influence of the
+control input on the second time derivative of $h$.
+
+Using this notation, because the system is control-affine, the second
+derivative of $y$ produces a term involving $\mathbf{u}$:
+
+$$
+\ddot{y} = L_f^2 y + L_g L_f y \cdot \mathbf{u}
+$$
+
+We choose the control input $\mathbf{u}$ so that the output obeys:
+
+$$
+\ddot{y} = -K_p y - K_d \dot{y}
+$$
+
+This is a PD-like control law that drives the output $y$ to zero
+exponentially. With appropriate gains $K_p, K_d > 0$, we get
+$y(t) \to 0$ and $\dot{y}(t) \to 0$.
+
+**Step 3: The zero dynamics surface.** When $y = 0$ and $\dot{y} = 0$
+are exactly satisfied, the virtual constraints are perfectly enforced.
+The system is then confined to the **zero dynamics surface** $Z$:
+
+$$
+Z = \{(\mathbf{q}, \dot{\mathbf{q}}) \mid y = 0, \dot{y} = 0\}
+$$
+
+<ZeroDynamicsSurfaceDiagram />
+
+**Step 4: Dimension reduction.** On this surface, the original $n$-DOF
+system reduces to a lower-dimensional system. For example, a 2-link
+planar biped has 2 DOF. With 1 virtual constraint, the zero dynamics
+are $2 - 1 = 1$ DOF, described by:
 
 $$
 \ddot{\theta} = \kappa(\theta, \dot{\theta})
@@ -243,6 +400,18 @@ else:
 3. **Low-dimensional analysis**: zero dynamics reduce the stability problem
 4. **Optimization-friendly**: Bezier coefficients are smooth optimization variables
 5. **Hardware validated**: successfully demonstrated on Cassie, Digit, MABEL
+
+## Connections to Other Chapters
+
+- **Passive Walking (Chapter 4)**: HZD inherits the Poincare map analysis
+  framework from passive walking theory. The stability of an HZD walking
+  gait is assessed by computing the eigenvalues of the linearized Poincare
+  return map, exactly as done for passive walkers on a slope.
+- **Reinforcement Learning (Chapter 11)**: HZD virtual constraints can serve
+  as the structure for RL policy output. Instead of learning raw joint
+  torques, an RL agent can learn Bezier coefficients $\alpha_k$ that define
+  the virtual constraints. This dramatically reduces the search space and
+  often leads to faster, more robust learning.
 
 ## References
 

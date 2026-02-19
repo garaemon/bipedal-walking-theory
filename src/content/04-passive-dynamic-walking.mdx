@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { PassiveWalkerDiagram, PoincareDiagram } from "@/components/diagrams/PassiveWalkerDiagram";
+import { PassiveWalkerAnimationDiagram } from "@/components/diagrams/PassiveWalkerAnimationDiagram";
 
 # Passive Dynamic Walking
 
@@ -23,12 +24,14 @@ A minimal passive walker consists of:
 
 <PassiveWalkerDiagram />
 
+<PassiveWalkerAnimationDiagram />
+
 ## Hybrid Dynamical System
 
-Passive walking is a **hybrid dynamical system** — it combines:
+Passive walking is a **hybrid dynamical system** -- it combines:
 
 1. **Continuous dynamics** (swing phase): governed by differential equations
-2. **Discrete events** (heel strike): instantaneous velocity changes
+1. **Discrete events** (heel strike): instantaneous velocity changes
 
 ### Swing Phase Dynamics
 
@@ -51,7 +54,11 @@ $$
 \ddot{\theta}_{sw} = \ddot{\theta}_{st} + \dot{\theta}_{st}^2 \sin(\theta_{sw}) - \cos(\theta_{st} - \gamma)\sin(\theta_{sw})
 $$
 
-(Angles measured from the slope normal, normalized by $g/l$.)
+> **Note on normalization:** The equations above are normalized by setting
+> $g/l = 1$ and $m_H/m = 1$. This means time is measured in units of
+> $\sqrt{l/g}$ and angles are in radians. Normalization is useful because
+> it reduces the number of free parameters, letting us study the dynamics
+> in terms of only the slope angle $\gamma$ and the mass ratio.
 
 ### Heel Strike (Impact Map)
 
@@ -70,9 +77,59 @@ $$
 
 for a symmetric walker with inter-leg angle $2\alpha$ at impact.
 
+### Deriving the Impact Transition Matrix
+
+The impact transition matrix $H$ is derived from the **angular momentum
+conservation principle**. Here is the physical reasoning step by step:
+
+1. **Just before impact**, the swing leg touches the ground. This creates an
+   impulsive ground reaction force at the new contact point.
+1. **The impulsive force acts through the new contact point**, so it produces
+   zero moment about that point. Therefore, **angular momentum about the new
+   contact point is conserved** across the impact instant.
+1. We write angular momentum before and after impact about the new stance foot:
+
+$$
+H_{after}(\theta^-) \dot{\theta}^+ = H_{before}(\theta^-) \dot{\theta}^-
+$$
+
+Solving for the post-impact velocities gives $\dot{\theta}^+ = H_{after}^{-1} H_{before} \dot{\theta}^-$.
+For the simplest compass-gait walker with point masses, the inertia matrices
+simplify, and the product $H_{after}^{-1} H_{before}$ yields the transition
+matrix $H$ shown above.
+
+The key physical consequence: **heel-strike always reduces the kinetic energy**
+because the velocity component perpendicular to the new stance leg is
+instantaneously lost (analogous to a perfectly inelastic collision).
+
+## Energy Balance in Passive Walking
+
+In steady-state walking on a slope, an elegant energy balance holds:
+the energy gained from descending the slope **exactly equals** the energy
+lost at each heel-strike collision.
+
+**Energy gained per step** from gravity:
+
+$$
+\Delta E_{gain} = m g \cdot d_{step} \cdot \sin(\gamma)
+$$
+
+where $d_{step}$ is the step length and $\gamma$ is the slope angle.
+
+**Energy lost at impact** from the velocity jump:
+
+$$
+\Delta E_{loss} = \frac{1}{2} m \left( v_{before}^2 - v_{after}^2 \right)
+$$
+
+For a periodic gait to exist, $\Delta E_{gain} = \Delta E_{loss}$.
+This condition uniquely determines the steady-state walking speed for a
+given slope angle. A steeper slope provides more energy, leading to faster
+walking with larger collision losses at each impact.
+
 ## Limit Cycles
 
-A stable passive gait corresponds to a **limit cycle** — a periodic orbit in
+A stable passive gait corresponds to a **limit cycle** -- a periodic orbit in
 state space that nearby trajectories converge to.
 
 ### Phase Portrait
@@ -188,39 +245,51 @@ dynamics rather than fighting them.
 
 ## Bifurcation and Chaos
 
-As slope angle $\gamma$ increases:
+As slope angle $\gamma$ increases, the passive walker exhibits **period-doubling
+bifurcation** -- a classic route to chaos in nonlinear dynamical systems.
 
-1. **Small $\gamma$**: stable period-1 gait (one step per cycle)
-2. **Moderate $\gamma$**: period-doubling bifurcation (period-2, period-4, ...)
-3. **Large $\gamma$**: chaotic walking, then falling
+**What this means physically:**
 
-This rich dynamical behavior connects bipedal walking to nonlinear dynamics
-and chaos theory.
+1. **Small $\gamma$**: The walker takes identical steps every cycle (period-1 gait).
+   Each step has the same step length and speed.
+1. **Moderate $\gamma$**: The walker begins alternating between two different step
+   patterns -- one long step followed by one short step (period-2 gait).
+   Further increase leads to period-4: four distinct steps before repeating.
+1. **Large $\gamma$**: The walker takes irregular, non-repeating steps (chaotic gait).
+   Eventually, the walker accumulates too much energy and falls.
+
+The actual compass-gait walker shows exactly this period-doubling cascade,
+as demonstrated numerically by Goswami et al. (1998). The code below
+illustrates the concept using the **logistic map as an analogy**. The logistic
+map $x_{n+1} = r x_n (1 - x_n)$ is NOT the walker's Poincare map, but it
+exhibits the same qualitative bifurcation structure, making it a useful
+pedagogical tool.
 
 <CodeEditor
   initialCode={`import math
 
-# Demonstrate period-doubling concept
-# Using a simple logistic-map analogy for the Poincare map
+# Demonstrate period-doubling using the logistic map as an ANALOGY.
+# The actual compass-gait Poincare map shows the same bifurcation
+# structure, but requires numerical ODE integration to compute.
 
-print("=== Bifurcation Behavior ===")
+print("=== Bifurcation Behavior (Logistic Map Analogy) ===")
 print()
-print("As slope increases, the gait transitions:")
+print("As slope increases, the walker gait transitions:")
 print("  Period-1 -> Period-2 -> Period-4 -> Chaos -> Falling")
 print()
 
-# Simplified model: map x_{n+1} = r * x_n * (1 - x_n)
-# r increases with slope angle
+# Logistic map: x_{n+1} = r * x_n * (1 - x_n)
+# Parameter r plays the role of slope angle gamma
 slopes = [
-    (0.02, 2.8, "Period-1 (stable)"),
-    (0.04, 3.2, "Period-2"),
-    (0.06, 3.5, "Period-4"),
-    (0.08, 3.9, "Chaos"),
+    (0.02, 2.8, "Period-1: every step is identical"),
+    (0.04, 3.2, "Period-2: alternating long/short steps"),
+    (0.06, 3.5, "Period-4: four-step repeating pattern"),
+    (0.08, 3.9, "Chaos: irregular, non-repeating steps"),
 ]
 
-for gamma_deg, r, label in slopes:
+for gamma_val, r, label in slopes:
     x = 0.5
-    # Run for 50 iterations to settle
+    # Run 50 iterations to reach the attractor
     for _ in range(50):
         x = r * x * (1 - x)
     # Collect next 8 iterations
@@ -230,7 +299,7 @@ for gamma_deg, r, label in slopes:
         values.append(x)
 
     unique = sorted(set(round(v, 4) for v in values))
-    print(f"Slope {gamma_deg:.2f} rad: {label}")
+    print(f"Slope ~{gamma_val:.2f} rad (r={r}): {label}")
     print(f"  Distinct states: {len(unique)}")
     print(f"  Values: {[f'{v:.4f}' for v in unique[:4]]}")
     print()
@@ -243,12 +312,26 @@ Passive dynamic walking provides insights for active walker design:
 
 1. **Exploit natural dynamics**: design controllers that work with, not against,
    the robot's natural motion
-2. **Minimal actuation**: add small amounts of energy at the right time
+1. **Minimal actuation**: add small amounts of energy at the right time
    (e.g., ankle push-off) rather than controlling every joint
-3. **Limit cycle stability**: design gaits as stable periodic orbits
+1. **Limit cycle stability**: design gaits as stable periodic orbits
 
 These principles influenced the development of efficient walking robots
 like Cornell's Ranger and Delft's Flame.
+
+### Connections to Other Chapters
+
+- **Hybrid Zero Dynamics (Chapter 9):** HZD uses the same Poincare map
+  framework to analyze stability of actively controlled walking gaits.
+  The key difference is that HZD adds feedback control to shape the limit cycle,
+  whereas passive walkers rely entirely on open-loop dynamics.
+- **Reinforcement Learning (Chapter 11):** RL-based locomotion controllers can
+  discover energy-efficient gaits that resemble passive walking. The cost of
+  transport metric connects passive walking theory to RL reward design.
+- **Central Pattern Generators (Chapter 7):** CPGs produce rhythmic motor
+  patterns that replicate the limit-cycle structure observed in passive walkers.
+  Both approaches share the idea that stable locomotion emerges from periodic
+  oscillatory dynamics.
 
 ## References
 
