@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { LIPMDiagram, WalkingTransitionDiagram } from "@/components/diagrams/InvertedPendulumDiagram";
+import { LIPMPhasePlaneDiagram } from "@/components/diagrams/LIPMPhasePlaneDiagram";
 
 # Inverted Pendulum Model
 
@@ -24,8 +25,26 @@ $$
 \ddot{\theta} - \frac{g}{l}\theta = \frac{\tau}{ml^2}
 $$
 
-This is an **unstable** system: the eigenvalues of the linearized dynamics
-include $\sqrt{g/l} > 0$, meaning small perturbations grow exponentially without control.
+This is an **unstable** system. To see why, rewrite the linearized equation in state-space form.
+Define the state vector $\mathbf{x} = [\theta, \dot{\theta}]^T$. With $\tau = 0$ (no control input), we get:
+
+$$
+\begin{bmatrix} \dot{\theta} \\ \ddot{\theta} \end{bmatrix} = \begin{bmatrix} 0 & 1 \\ g/l & 0 \end{bmatrix} \begin{bmatrix} \theta \\ \dot{\theta} \end{bmatrix}
+$$
+
+The eigenvalues of the system matrix $A$ are found from $\det(A - \lambda I) = 0$:
+
+$$
+\lambda^2 - \frac{g}{l} = 0 \quad \Rightarrow \quad \lambda = \pm\sqrt{\frac{g}{l}}
+$$
+
+The positive eigenvalue $\lambda_+ = +\sqrt{g/l}$ corresponds to an exponentially
+divergent mode, while $\lambda_- = -\sqrt{g/l}$ corresponds to a convergent mode.
+Any small perturbation will excite the divergent mode, causing the pendulum to
+fall over exponentially fast. This is fundamentally why walking is difficult:
+bipedal locomotion is essentially the act of continuously stabilizing an
+unstable system. Without active control (or careful passive dynamics), the
+walker will inevitably fall.
 
 ## Linear Inverted Pendulum Model (LIPM)
 
@@ -47,7 +66,30 @@ $$
 
 Since $z = z_c$ is constant, $\ddot{z} = 0$, so $F_z = mg$.
 
-The leg force direction gives us $F_x / F_z = (x - p_x) / z_c$, therefore:
+### Eliminating the Constraint Force
+
+The key step is to recognize that because the leg is **rigid and massless**,
+the constraint force $F$ must act **along the direction of the leg**. If there
+were any component perpendicular to the leg, it would cause infinite angular
+acceleration of the massless leg, which is unphysical.
+
+The leg points from the support point $(p_x, 0)$ to the CoM $(x, z_c)$.
+If we let $\theta$ be the angle of the leg from the vertical, we can decompose
+the constraint force $F$ into its horizontal and vertical components by the
+geometry of the triangle formed by the leg:
+
+$$
+F_x = F \sin\theta = F \cdot \frac{x - p_x}{L}, \quad F_z = F \cos\theta = F \cdot \frac{z_c}{L}
+$$
+
+where $L = \sqrt{(x - p_x)^2 + z_c^2}$ is the leg length. Taking the ratio
+of these two equations eliminates both $F$ and $L$:
+
+$$
+\frac{F_x}{F_z} = \frac{x - p_x}{z_c}
+$$
+
+Substituting $F_z = mg$ (from the vertical equation) gives:
 
 $$
 m\ddot{x} = \frac{mg}{z_c}(x - p_x)
@@ -112,6 +154,40 @@ This quantity is conserved during single-support phases. Trajectories with:
 - $E = 0$: the CoM asymptotically approaches or leaves the support point
 - $E < 0$: the CoM oscillates around the support point (not physically meaningful for walking)
 
+### Intuitive Understanding of Orbital Energy
+
+To build intuition, consider the analogy of a ball rolling on a hill.
+Imagine a ball on a landscape shaped like a saddle: the ball can either
+roll over the hill if it has enough kinetic energy, or get stuck oscillating
+in a valley if it does not. The orbital energy $E$ plays the role of the
+total mechanical energy in this analogy.
+
+When $E > 0$, the CoM has enough kinetic energy to "vault over" the
+support point. This is the walking regime: the body passes over one
+foot and continues forward to the next step. In a typical walking gait,
+the orbital energy stays positive throughout each single-support phase.
+
+When $E = 0$, the trajectory lies exactly on the **separatrix** (the
+boundary between the walking and non-walking regions). In this case,
+the CoM would take infinitely long to reach or depart from the support
+point. This is a theoretical boundary that is never exactly realized
+in practice, but it defines the minimum energy needed for walking.
+
+The conservation of orbital energy is powerful because it means the
+entire trajectory is determined by the initial state alone. If you know
+the position and velocity of the CoM at any instant during a single-support
+phase, you can predict where the CoM will be at every other instant.
+This makes the LIPM analytically tractable and is one of the main reasons
+it is so widely used in walking pattern generation.
+
+### Phase Plane Visualization
+
+The phase plane plots position $x$ against velocity $\dot{x}$ and reveals
+the global structure of the dynamics. Each curve in the diagram below
+represents a constant orbital energy level.
+
+<LIPMPhasePlaneDiagram />
+
 ## Python Simulation: LIPM Trajectory
 
 <CodeEditor
@@ -157,9 +233,38 @@ for i in range(0, steps + 1, 10):
 To generate a walking pattern, we chain multiple single-support phases together.
 At each step transition, the support point shifts to the new foot position.
 
-The key insight is that by choosing appropriate step lengths and timing,
-we can maintain a periodic walking gait. The **step-to-step transition** maps
-the state at the end of one step to the initial state of the next.
+### Step-to-Step Transition Map
+
+The **step-to-step transition map** is a function that takes the state
+$(x, \dot{x})$ at the end of one single-support phase (measured relative to
+the current support foot) and maps it to the state at the beginning of the
+next phase (measured relative to the new support foot). When the robot takes
+a step of length $d$, the position in the new coordinate frame becomes
+$x_{\text{new}} = x_{\text{end}} - d$, while the velocity is unchanged:
+$\dot{x}_{\text{new}} = \dot{x}_{\text{end}}$.
+
+A **periodic gait** exists when the transition map has a **fixed point**:
+the state at the start of each step is identical. This means the robot
+repeats the same trajectory every step, which is exactly what steady-state
+walking looks like.
+
+### Why the Initial Velocity Uses tanh
+
+For a periodic gait with step duration $T$ and step length $d$, we require
+the CoM to start at $x = -d/2$ (behind the support foot) and end at
+$x = +d/2$ (ahead of it) due to symmetry. Substituting into the LIPM
+analytical solution and solving for the initial velocity $\dot{x}_0$ gives:
+
+$$
+\dot{x}_0 = \frac{d/2 \cdot \omega}{\tanh(\omega T / 2)}
+$$
+
+The $\tanh$ function appears because $\cosh$ and $\sinh$ satisfy
+$\cosh^2 - \sinh^2 = 1$, and the symmetry condition requires the ratio
+$x_0 / (\dot{x}_0 / \omega) = -\tanh(\omega T / 2)$. Since
+$\tanh(\omega T / 2) < 1$, the required initial velocity is always larger
+than $d \omega / 2$, reflecting the extra energy needed to overcome the
+unstable dynamics.
 
 <CodeEditor
   initialCode={`import math

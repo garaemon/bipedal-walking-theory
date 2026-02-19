@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { PreviewControlDiagram, CoMZMPSystemDiagram } from "@/components/diagrams/PreviewControlDiagram";
+import { PreviewGainDiagram } from "@/components/diagrams/PreviewGainDiagram";
 
 # Preview Control for Walking
 
@@ -19,7 +20,17 @@ p_x = x - \frac{z_c}{g}\ddot{x}
 $$
 
 To apply optimal control, we use the **jerk** $u = \dddot{x}$ as the control
-input. The state vector is $\mathbf{x} = [x, \dot{x}, \ddot{x}]^T$, giving
+input. Why jerk, rather than acceleration or velocity? The key reason lies
+in the ZMP equation above: the ZMP depends on the CoM **acceleration**
+$\ddot{x}$. If we controlled the acceleration directly, any sudden change
+in the control input would cause the ZMP to jump discontinuously. By
+controlling the **jerk** (the time derivative of acceleration), we ensure
+that acceleration changes smoothly over time, which in turn makes the ZMP
+trajectory smooth and continuous. This is essential for physical
+realizability: a robot's feet cannot instantaneously change the ground
+reaction force, so smooth ZMP trajectories are required for stable walking.
+
+The state vector is $\mathbf{x} = [x, \dot{x}, \ddot{x}]^T$, giving
 the discrete-time state-space model:
 
 $$
@@ -73,6 +84,23 @@ The optimal preview controller has three components:
 The preview gains $G_p(j)$ decay with preview horizon $j$, meaning
 near-future references have more influence than distant ones.
 
+### Intuitive Understanding
+
+Preview control is analogous to driving a car: a skilled driver looks
+ahead at the road to steer smoothly through curves, rather than reacting
+only to what is directly under the wheels.
+
+- **Without preview** (pure feedback control), the CoM reacts **after** the
+  ZMP reference changes. This is like driving by only looking at the road
+  directly beneath the car. The result is jerky, delayed tracking with
+  large overshoot at each step transition.
+- **With preview**, the CoM starts shifting weight **before** a step
+  transition occurs, because the controller already knows where the ZMP
+  reference is heading. This produces smooth, natural-looking motion.
+- The preview window typically covers **1.5 to 2 seconds** (about 2-3
+  steps ahead). Looking further ahead gives diminishing returns because the
+  preview gains $G_p(j)$ decay exponentially.
+
 ## Computing Preview Gains
 
 The gains are obtained by solving the **discrete-time algebraic Riccati equation** (DARE):
@@ -81,8 +109,40 @@ $$
 P = A_e^T P A_e - A_e^T P B_e (R + B_e^T P B_e)^{-1} B_e^T P A_e + C_e^T Q_e C_e
 $$
 
-where $A_e$, $B_e$, $C_e$ are the augmented system matrices that include
-the integrator state.
+where $A_e$, $B_e$, $C_e$ are the **augmented system matrices** that include
+the integrator state. The augmented state vector is
+$\mathbf{x}_e = [\varepsilon, \Delta x, \Delta \dot{x}, \Delta \ddot{x}]^T$,
+where $\varepsilon$ tracks the cumulative ZMP error (the integral term) and
+$\Delta$ denotes the increment from the previous time step
+(e.g., $\Delta x = x_k - x_{k-1}$). The augmented matrices are:
+
+$$
+A_e = \begin{bmatrix} 1 & C A \\ \mathbf{0} & A \end{bmatrix}
+= \begin{bmatrix}
+1 & 1 & T & T^2/2 - z_c/g \\
+0 & 1 & T & T^2/2 \\
+0 & 0 & 1 & T \\
+0 & 0 & 0 & 1
+\end{bmatrix}
+$$
+
+$$
+B_e = \begin{bmatrix} CB \\ B \end{bmatrix}
+= \begin{bmatrix}
+T^3/6 - z_cT/g \\
+T^3/6 \\
+T^2/2 \\
+T
+\end{bmatrix}, \quad
+C_e = \begin{bmatrix} 1 & 0 & 0 & 0 \end{bmatrix}
+$$
+
+The top row of $A_e$ propagates the ZMP error integral using the output
+equation $p = C\mathbf{x}$, while the lower block propagates the original
+LIPM dynamics in incremental form. This augmented formulation is what
+guarantees zero steady-state tracking error through the integral action.
+
+<PreviewGainDiagram />
 
 <CodeEditor
   initialCode={`import math
@@ -165,6 +225,17 @@ print("values for better anticipation and smoother tracking.")
 `}
 />
 
+The gains used above (`Gi = 1200`, `Gx = [8e5, 7e3, 30]`) come from
+solving the DARE with weight parameters $Q_e = 1.0$ and $R = 1 \times 10^{-6}$.
+The large $Q_e / R$ ratio (on the order of $10^6$) means we strongly
+prioritize ZMP tracking accuracy over minimizing control effort. In
+practice, the jerk input is cheap to produce, so this trade-off is
+appropriate. The preview gains $G_p(j)$ decay exponentially with $j$:
+references far in the future barely affect the current control input, while
+the next few steps dominate. This is consistent with intuition: what
+happens 2 seconds from now matters much less than what happens in the next
+0.1 seconds.
+
 ## Walking Pattern Generation Pipeline
 
 The complete pipeline for ZMP-based walking:
@@ -241,6 +312,26 @@ for k in range(n_steps):
         print(f"{t:5.2f}    {x[0]:7.4f}   {p:7.4f}   {zmp_ref_x[k]:7.4f}    {e*1000:+6.2f}")
 `}
 />
+
+## Comparison with Model Predictive Control (MPC)
+
+Preview control and MPC (covered in Chapter 10) both use future reference
+information, but they differ fundamentally in how they compute the control
+input:
+
+| Aspect | Preview Control | MPC |
+|--------|----------------|-----|
+| **Optimization** | Infinite-horizon LQR solved **offline** | Finite-horizon QP solved **online** at each step |
+| **Gains** | Pre-computed once, applied as a lookup | Re-computed every control cycle |
+| **Speed** | Very fast at runtime (just multiply and sum) | Slower (requires solving an optimization problem) |
+| **Constraints** | Cannot enforce constraints (e.g., ZMP bounds) | Can explicitly enforce ZMP and actuation limits |
+| **Flexibility** | Fixed linear model only | Can incorporate nonlinear models |
+
+In essence, preview control can be viewed as an **unconstrained MPC** with
+a pre-computed closed-form solution. When constraints are not active (e.g.,
+the ZMP reference is well within the support polygon), both methods produce
+nearly identical results. MPC becomes necessary when the robot must walk
+near its physical limits or handle unexpected disturbances.
 
 ## Advantages and Limitations
 

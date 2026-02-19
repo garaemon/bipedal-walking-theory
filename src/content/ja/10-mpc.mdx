@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { MPCHorizonDiagram } from "@/components/diagrams/MPCDiagram";
+import { MPCConstraintDiagram } from "@/components/diagrams/MPCConstraintDiagram";
 
 # モデル予測制御 (MPC)
 
@@ -22,6 +23,16 @@ import { MPCHorizonDiagram } from "@/components/diagrams/MPCDiagram";
 最初の入力 $u_0^*$ のみを適用し、次のステップで再度解きます。
 
 <MPCHorizonDiagram />
+
+### なぜ後退ホライズンなのか？
+
+最初に長いホライズンの問題を一度だけ解いて、その計画をそのまま実行すれば良いのではないでしょうか？ それには3つの重要な理由があります:
+
+1. **モデル誤差**: LIPMは簡略化モデルです。実際のロボットには関節の柔軟性、モデル化されていない摩擦、その他モデルが無視するダイナミクスがあります。小さな誤差が時間とともに蓄積します。
+2. **外乱**: 外力による押し、凹凸のある地面、滑りやすい路面などは事前に予測できません。再度解くことで、計測された状態をフィードバックとして取り込めます。
+3. **目標の変化**: 歩行中に目標とする歩行パターンが変わることがあります（例：障害物の出現、人間からの新しい指令）。MPCは現在の状態から再計画するため、自然に適応できます。
+
+各タイムステップで最新の計測状態を用いて再度解くことで、MPCはこれらの問題すべてを継続的に修正します。カーナビが出発時に一度だけルートを計算するのではなく、数秒ごとにルートを再計算するのに似ています。
 
 ## LIPMを用いた線形MPC
 
@@ -47,11 +58,87 @@ $$
 
 ここで $\mathbf{U} = [u_0, u_1, \ldots, u_{N-1}]^T$ はスタックされた制御入力です。
 
+### 状態空間モデルからQPを構成する方法
+
+行列 $H$ と $\mathbf{f}$ を具体的に求めるため、ダイナミクスを予測ホライズンの $N$ ステップにわたって「展開」します。
+
+**ステップ1: ダイナミクスの積み上げ**
+初期状態 $\mathbf{x}_0$ から出発し、すべての将来の状態を初期状態と制御列の関数として書くことができます:
+
+$$
+\mathbf{X} = \Phi \mathbf{x}_0 + \Gamma \mathbf{U}
+$$
+
+ここで $\mathbf{X} = [\mathbf{x}_1, \mathbf{x}_2, \ldots, \mathbf{x}_N]^T$ は積み上げられた状態ベクトルであり、
+
+$$
+\Phi = \begin{bmatrix} A \\ A^2 \\ \vdots \\ A^N \end{bmatrix}, \quad
+\Gamma = \begin{bmatrix}
+B & 0 & \cdots & 0 \\
+AB & B & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+A^{N-1}B & A^{N-2}B & \cdots & B
+\end{bmatrix}
+$$
+
+$\Phi$ は初期状態を将来に伝播し、$\Gamma$ は制御入力を将来の状態に写す下三角行列です。
+
+**ステップ2: ZMP軌道の予測**
+各ステップのZMPは $p_i = C \mathbf{x}_i$ です。すべてのZMP予測を積み上げると:
+
+$$
+\mathbf{P} = \bar{C} \mathbf{X} = \bar{C} \Phi \mathbf{x}_0 + \bar{C} \Gamma \mathbf{U}
+$$
+
+ここで $\bar{C} = \text{diag}(C, C, \ldots, C)$ はブロック対角行列です。
+
+**ステップ3: コスト関数の構成**
+ZMP追従コストは:
+
+$$
+J = (\mathbf{P} - \mathbf{P}_{ref})^T Q (\mathbf{P} - \mathbf{P}_{ref}) + \mathbf{U}^T R \mathbf{U}
+$$
+
+これを展開して $\mathbf{U}$ の項をまとめると:
+
+$$
+H = \Gamma^T \bar{C}^T Q \bar{C} \Gamma + R
+$$
+
+$$
+\mathbf{f} = \Gamma^T \bar{C}^T Q (\bar{C} \Phi \mathbf{x}_0 - \mathbf{P}_{ref})
+$$
+
+**小さな例 (N=3):** サンプリング周期 $T = 0.1$ sの場合、$\Gamma$ の各列は1つの制御入力がすべての将来の状態に与える影響を含みます。例えば、$u_0$ は $B$ を通じて $\mathbf{x}_1$ に、$AB$ を通じて $\mathbf{x}_2$ に、$A^2B$ を通じて $\mathbf{x}_3$ に影響します。一方 $u_2$ は $B$ を通じて $\mathbf{x}_3$ にのみ影響します。この下三角構造が鍵です: 早い時刻の制御入力ほど、予測軌道に大きな影響を持ちます。
+
+## MPC vs. LQR vs. プレビュー制御
+
+MPCが前の章の他のコントローラとどう関係するかを理解すると、各手法をいつ使うべきかが明確になります。
+
+- **LQR**（第4章）は特殊ケースです: 制約なしの無限ホライズンMPCに相当します。LQRはオフラインで計算された固定ゲイン行列 $K$ を生成するため、オンラインでの最適化は不要です。
+- **プレビュー制御**（第5章）も特殊ケースです: 将来の参照値のプレビュー窓を持つ無限ホライズン制御ですが、不等式制約はありません。
+- **MPCの最大の利点は制約処理です。** ZMPが支持多角形内に留まること、ステップ長が制限内であることなどを明示的に保証できます。
+- 制約がアクティブでない場合、MPCとLQRはほぼ同一の制御入力を生成します。制約処理こそが、追加の計算コストに見合うMPCの価値です。
+
+| 特徴 | プレビュー制御 | MPC |
+|---|---|---|
+| 制約 | なし | あり |
+| 計算 | オフラインのゲイン行列 | 各ステップでオンラインQP |
+| 最適性 | 無限ホライズン | 有限ホライズン (Nステップ) |
+| 反応性 | 限定的（固定ゲイン） | 高い（毎ステップ再計画） |
+| 歩行パターンの変更 | オンライン変更不可 | オンラインで適応可能 |
+
 <CodeEditor
   initialCode={`import math
 
 # Simple Linear MPC for LIPM walking
-# Using a basic gradient descent solver (for demonstration)
+# Using unconstrained gradient descent (for demonstration only).
+#
+# Note: This simplified example uses unconstrained gradient descent
+# for illustration. In practice, walking MPC uses dedicated QP solvers
+# (qpOASES, OSQP, Clarabel) that handle inequality constraints
+# efficiently. Typical computation times are 0.1-5 ms per solve,
+# allowing control at 100-1000 Hz.
 
 g = 9.81
 z_c = 0.8
@@ -147,19 +234,29 @@ for k in range(sim_steps):
 
 プレビュー制御に対するMPCの主な利点は、明示的な**制約処理**が可能なことです:
 
+<MPCConstraintDiagram />
+
 ### ZMP制約
+
 $$
 p_{x,min} \leq C\mathbf{x}_i \leq p_{x,max}
 $$
 
-境界値は足のステップタイミング（支持多角形）に応じて変化します。
+境界値は足のステップタイミング（支持多角形）に応じて変化します。これらの制約は予測行列を介して $\mathbf{U}$ に対する線形不等式として表現されます:
+
+$$
+\bar{C}\Gamma \mathbf{U} \leq \mathbf{b}_{max} - \bar{C}\Phi \mathbf{x}_0, \quad
+-\bar{C}\Gamma \mathbf{U} \leq -\mathbf{b}_{min} + \bar{C}\Phi \mathbf{x}_0
+$$
 
 ### 運動学的制約
+
 - 最大ステップ長
 - 足のクリアランス高さ
 - 関節角度制限
 
 ### タイミング適応
+
 MPCはCoM軌道だけでなく、**いつ**ステップを踏むかも最適化できます。これにより、外力に対する反応的なステッピングが可能になります。
 
 ## 非線形MPC
@@ -181,12 +278,15 @@ $$
 
 ## リアルタイム性の考慮
 
-歩行MPCは制御ループ内（約1-10 ms）で解く必要があります。戦略:
+歩行MPCは制御ループ内（約1-10 ms）で解く必要があります。以下の戦略によりこれが可能になります:
 
-1. **ウォームスタート**: 前回の解を初期推定値として使用
-2. **早期終了**: 固定反復回数後に準最適解を受け入れる
-3. **凝縮定式化**: 状態を消去して問題サイズを削減
-4. **専用ソルバー**: 歩行QPのスパース構造を活用
+1. **ウォームスタート**: 前回の解を1ステップずらしたものを、現在のQPの初期推定値として使用します。問題は連続するタイムステップ間でわずかしか変化しないため、ずらした解はすでに最適解に近い状態です。これによりソルバーが必要とする反復回数が大幅に減少します。
+
+2. **早期終了**: 固定反復回数後に準最適解を受け入れます。歩行においては、時間内に適用されるわずかに準最適な制御入力の方が、遅れて到着する数学的に最適な入力よりもはるかに有用です。
+
+3. **凝縮定式化**: ダイナミクス制約を代入してすべての状態変数を消去し、QPを $\mathbf{U}$ のみのより小さな問題に縮小します。これはまさに上で導出した $H$、$\mathbf{f}$ の定式化です。密だが小さいQPと、疎だが大きいQPのトレードオフがあります。
+
+4. **専用ソルバー**: 歩行QPは各状態が前の状態にのみ依存するため、帯状（バンド）構造を持ちます。この疎性を活用するソルバー（例: HPIPM）は、反復あたり $O(N^3)$ ではなく $O(N)$ の計算量を達成し、長いホライズンを実現可能にします。
 
 ## 参考文献
 

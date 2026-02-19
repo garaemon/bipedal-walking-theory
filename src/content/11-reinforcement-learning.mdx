@@ -2,12 +2,43 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { RLLoopDiagram } from "@/components/diagrams/RLDiagram";
+import { PPODiagram } from "@/components/diagrams/PPODiagram";
 
 # Reinforcement Learning for Walking
 
 Reinforcement Learning (RL) has revolutionized bipedal locomotion by
 enabling robots to discover walking behaviors through trial and error
 in simulation, often surpassing hand-designed controllers.
+
+## Why Reinforcement Learning for Walking?
+
+Walking involves complex contact dynamics: feet collide with the ground,
+friction forces change discontinuously, and the robot must coordinate
+many joints simultaneously. These challenges make walking hard to solve
+with traditional approaches alone.
+
+**Model-based methods** (ZMP in Ch 3, MPC in Ch 10) require accurate
+dynamic models. In practice, modeling ground contact, joint friction,
+and actuator dynamics precisely is difficult. Small model errors
+accumulate and cause the robot to fall.
+
+**RL learns directly from interaction** with a physics simulator,
+without needing an explicit model. The policy discovers what works
+through trial and error. This allows RL to:
+
+- Handle complex contact dynamics that are hard to model analytically
+- Discover creative locomotion strategies that engineers would not design by hand
+- Generalize across terrains and perturbations when trained with domain randomization
+
+**However, RL has important limitations:**
+
+- **Sample inefficiency**: training may require billions of simulation steps
+- **Reward engineering**: poorly designed rewards lead to unnatural or exploitative behaviors
+- **Sim-to-real gap**: policies trained in simulation may fail on real hardware (see Ch 12)
+
+The practical trade-off is: RL is general but data-hungry, while model-based
+methods are data-efficient but limited by model accuracy. Modern approaches
+increasingly combine both (see Connections at the end).
 
 ## MDP Formulation for Locomotion
 
@@ -23,6 +54,9 @@ The goal is to find a policy $\pi_\theta(a|s)$ that maximizes expected cumulativ
 $$
 J(\theta) = \mathbb{E}_{\pi_\theta}\left[\sum_{t=0}^{T} \gamma^t r(s_t, a_t)\right]
 $$
+
+where $\gamma \in [0, 1)$ is the discount factor that controls how much the agent
+cares about future rewards versus immediate ones.
 
 <RLLoopDiagram />
 
@@ -41,12 +75,25 @@ $$
 | Alive | $r_a = +1$ per step | Encourage survival |
 | Style | $r_s = -\|q - q_{ref}\|^2$ | Match reference motion |
 
-### Common Pitfalls
+### The Art of Reward Engineering
 
-- **Reward hacking**: robot finds unexpected ways to maximize reward
-  (e.g., sliding instead of walking)
-- **Sparse rewards**: "reach the goal" gives insufficient learning signal
-- **Over-constraining**: too many style penalties prevent exploration
+Reward design profoundly affects the learned behavior. Small changes in
+reward weights can produce completely different gaits.
+
+**Common failure modes:**
+
+- **Too much velocity reward**: the robot leans forward aggressively and falls after a few steps
+- **No energy penalty**: the robot uses excessively large torques, leading to unrealistic and hardware-damaging motions
+- **No smoothness penalty**: the resulting gait is jittery with rapid torque oscillations
+- **Reward hacking**: the robot finds unexpected ways to maximize reward (e.g., sliding instead of walking, or vibrating to accumulate alive bonuses)
+- **Sparse rewards**: "reach the goal" alone gives insufficient learning signal for the agent to discover walking
+
+**Practical guidelines:**
+
+1. Start with a simple reward (alive bonus + forward velocity) and verify basic behavior
+2. Add penalty terms incrementally (energy, smoothness, joint limits)
+3. Use curriculum learning to increase task difficulty gradually
+4. Consider motion imitation rewards (see DeepMimic section below) to avoid most design issues entirely
 
 ## Policy Gradient Methods
 
@@ -61,7 +108,51 @@ $$
 where $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ is the
 probability ratio and $A_t$ is the advantage estimate.
 
-PPO is popular because it balances sample efficiency with stability.
+**Why clipping?** Without clipping, a large policy update could drastically change behavior,
+causing catastrophic performance collapse. The clip range (typically $\epsilon = 0.2$) defines
+a "trust region" around the old policy. If the new policy tries to move too far from the old
+one, the clipped objective stops the gradient from pushing further. This ensures stable,
+incremental policy improvements.
+
+### Generalized Advantage Estimation (GAE)
+
+The advantage $A_t$ estimates "how much better was this action compared to what we expected."
+GAE computes it using a weighted combination of multi-step temporal difference errors:
+
+$$
+A_t^{GAE} = \sum_{l=0}^{T-t} (\gamma \lambda)^l \delta_{t+l}
+$$
+
+where the TD error at each step is:
+
+$$
+\delta_t = r_t + \gamma V(s_{t+1}) - V(s_t)
+$$
+
+The parameter $\lambda \in [0, 1]$ controls the bias-variance trade-off:
+
+- $\lambda = 0$: uses only the one-step TD error $\delta_t$. Low variance but high bias (relies heavily on the value function accuracy).
+- $\lambda = 1$: uses the full Monte Carlo return. Low bias but high variance (sensitive to individual trajectory noise).
+- In practice, $\lambda = 0.95$ is a common choice that balances both.
+
+<PPODiagram />
+
+### On-Policy vs Off-Policy Methods
+
+Two fundamental approaches exist for collecting and using training data:
+
+**PPO (on-policy):** collects a batch of trajectories, updates the policy, then
+discards the data. Simple and stable, but requires fresh data each iteration.
+
+**SAC (Soft Actor-Critic, off-policy):** stores all experience in a replay buffer
+and reuses old data across many updates. More sample-efficient but harder to tune,
+as old data may not reflect the current policy.
+
+**For locomotion, PPO is more popular because:**
+
+1. It is easy to parallelize across thousands of simulation environments
+2. Training is more stable and requires less hyperparameter tuning
+3. Modern GPU-accelerated simulators (e.g., IsaacGym) can run 4096+ parallel environments, making PPO's sample inefficiency less of a practical issue
 
 <CodeEditor
   initialCode={`import math
@@ -69,6 +160,14 @@ import random
 
 # Simplified RL for a 1D walking task
 # (CartPole-like balance + forward velocity)
+#
+# Note: This example uses a simple Evolution Strategy (ES) for
+# demonstration. ES is not a gradient-based RL algorithm, but it
+# shares the same optimization goal: find policy parameters that
+# maximize cumulative reward. True PPO uses policy gradient
+# computation with neural network backpropagation, which requires
+# deep learning libraries (PyTorch, JAX) not available in this
+# browser environment.
 
 random.seed(42)
 
@@ -188,7 +287,10 @@ r_{imitation} = w_p \exp(-\|q - q^{ref}\|^2) + w_v \exp(-\|\dot{q} - \dot{q}^{re
 $$
 
 This dramatically improves learning speed and motion quality by guiding
-the policy toward natural-looking gaits.
+the policy toward natural-looking gaits. Motion imitation also sidesteps
+most reward engineering difficulties: the reference motion implicitly
+defines what "good walking" looks like, eliminating the need to manually
+balance velocity, energy, and style reward weights.
 
 ## Curriculum Learning
 
@@ -200,11 +302,25 @@ Complex walking is often learned progressively:
 4. **External perturbations**: push recovery
 5. **Agile behaviors**: running, jumping, turning
 
+Each stage builds on the policy learned in the previous stage. The key
+insight is that a policy trained only on easy tasks generalizes poorly,
+while training directly on hard tasks fails because the reward signal
+is too sparse for the agent to discover useful behaviors.
+
+## Connections to Other Chapters
+
+- **Sim-to-Real Transfer (Ch 12)**: RL policies are trained in simulation and transferred to real robots. Domain randomization and system identification are essential for bridging the sim-to-real gap.
+- **CPG (Ch 7)**: Central Pattern Generators can provide structured action spaces for RL. Instead of learning raw joint torques, the policy can output CPG parameters (frequency, amplitude), reducing the search space.
+- **MPC (Ch 10)**: Model-based methods like MPC can be combined with RL. For example, a learned dynamics model can replace the analytical model in MPC, or RL can learn a residual correction on top of an MPC baseline.
+- **The trend**: modern locomotion systems increasingly use hybrid approaches that combine model-based structure with learned components. Pure RL and pure model-based methods each have complementary strengths.
+
 ## References
 
 - X. Peng et al., "[DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based Character Skills](https://arxiv.org/abs/1804.02717)," *ACM TOG*, 2018.
 - Z. Xie et al., "[Feedback Control For Cassie With Deep Reinforcement Learning](https://arxiv.org/abs/1803.05580)," *Proc. IROS*, 2018.
 - J. Schulman et al., "[Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)," *arXiv*, 2017.
+- J. Schulman et al., "[High-Dimensional Continuous Control Using Generalized Advantage Estimation](https://arxiv.org/abs/1506.02438)," *ICLR*, 2016.
+- T. Haarnoja et al., "[Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning](https://arxiv.org/abs/1801.01290)," *ICML*, 2018.
 
 <InteractiveDemo title="RL Training Visualization">
   <p className="text-sm text-gray-500">

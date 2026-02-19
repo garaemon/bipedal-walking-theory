@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { CPGNetworkDiagram } from "@/components/diagrams/CPGDiagram";
+import { HopfOscillatorDiagram } from "@/components/diagrams/HopfOscillatorDiagram";
 
 # Central Pattern Generators (CPG)
 
@@ -33,6 +34,35 @@ where:
 
 <CPGNetworkDiagram />
 
+### Why Coupled Oscillators Converge
+
+It is not immediately obvious why this coupling law forces the oscillators into
+the desired phase relationships. To see why, define the phase error between
+oscillators $i$ and $j$ as:
+
+$$
+e_{ij} = \phi_j - \phi_i - \psi_{ij}
+$$
+
+When the oscillators are synchronized at the desired relationship, $e_{ij} = 0$.
+Near this synchronized state, the coupling term $w_{ij}\sin(e_{ij})$ behaves
+like a **restoring force**: if $e_{ij}$ is small and positive (the phase
+difference is larger than desired), $\sin(e_{ij}) > 0$ pulls oscillator $i$
+forward to close the gap. If $e_{ij}$ is negative, the force reverses.
+
+To analyze stability more rigorously, linearize $\sin(e_{ij}) \approx e_{ij}$
+near $e_{ij}=0$. The dynamics of the error become:
+
+$$
+\dot{e}_{ij} \approx -(w_{ij} + w_{ji})\, e_{ij}
+$$
+
+As long as the coupling weights are positive, this is a stable first-order
+system with exponential convergence. The coupling acts exactly like a spring
+(with stiffness $w_{ij} + w_{ji}$) that keeps the oscillators "locked" in
+the correct phase relationship. Stronger coupling weights produce faster
+convergence but can also make the system stiffer and less adaptive.
+
 ## Phase Coordination for Walking
 
 For bipedal walking, the key phase relationships are:
@@ -57,6 +87,33 @@ $$
 
 where $r_i = \sqrt{x_i^2 + y_i^2}$, $\mu_i$ controls the amplitude, and
 $\alpha$ controls the convergence rate to the limit cycle.
+
+### Hopf Oscillator Intuition
+
+The equations above become much clearer when expressed in **polar coordinates**
+$(r, \theta)$ where $x = r\cos\theta$ and $y = r\sin\theta$:
+
+$$
+\dot{r} = \alpha(\mu - r^2)\,r, \quad \dot{\theta} = \omega
+$$
+
+The angular equation $\dot{\theta} = \omega$ simply means the oscillator
+rotates at a constant frequency. The radial equation is where the key
+behavior lies. Setting $\dot{r} = 0$ to find equilibria:
+
+- $r = 0$ is an equilibrium, but it is **unstable**: if $r$ is slightly
+  positive and $\mu > 0$, then $\mu - r^2 > 0$, so $\dot{r} > 0$ and
+  $r$ grows.
+- $r = \sqrt{\mu}$ is a **stable equilibrium**: if $r < \sqrt{\mu}$,
+  then $\dot{r} > 0$ (amplitude grows); if $r > \sqrt{\mu}$, then
+  $\dot{r} < 0$ (amplitude shrinks).
+
+This means the amplitude **self-regulates** to $\sqrt{\mu}$ regardless of
+initial conditions. This is the defining property of a **limit cycle**: it
+attracts all nearby trajectories. The parameter $\alpha$ controls how quickly
+this convergence happens.
+
+<HopfOscillatorDiagram />
 
 <CodeEditor
   initialCode={`import math
@@ -179,6 +236,62 @@ for name, freq in speeds:
 `}
 />
 
+## Sensory Feedback Integration
+
+One of the most important features of biological CPGs is their ability to
+integrate sensory feedback. Rather than running as pure open-loop oscillators,
+real CPGs receive continuous proprioceptive input that modulates their behavior.
+
+**Proprioceptive feedback** (joint angles, angular velocities, foot contact
+forces) can modify CPG parameters in real time:
+
+- **Ground contact sensors** trigger phase transitions. For example, when the
+  foot touches the ground, the CPG can immediately switch from swing phase to
+  stance phase, even if the oscillator has not yet reached that phase naturally.
+- **Joint angle feedback** adjusts oscillator amplitude. If a joint cannot
+  reach its target angle (e.g., due to an obstacle), the amplitude parameter
+  $\mu$ can be reduced to prevent excessive torque.
+- **Force feedback** modulates stance duration. Higher ground reaction forces
+  (e.g., carrying a heavy load) can slow the stance phase, giving the robot
+  more time to transfer weight safely.
+
+This creates a **closed-loop CPG** that adapts to terrain and disturbances.
+A practical example: if the foot contacts the ground earlier than expected
+(e.g., stepping onto a raised surface), the ground contact sensor advances
+the CPG phase to match the actual ground contact timing. Mathematically, this
+is implemented as an additive phase correction:
+
+$$
+\dot{\phi}_i = \omega_i + \sum_j w_{ij}\sin(\phi_j - \phi_i - \psi_{ij}) + F_{\text{feedback}}(\phi_i, s_i)
+$$
+
+where $s_i$ represents the sensory signals and $F_{\text{feedback}}$ is a
+function that maps sensor readings to phase corrections.
+
+## Mapping CPG Outputs to Robot Motions
+
+CPG outputs are typically joint angle trajectories or angular velocity commands.
+However, for walking robots, these signals need to be mapped to physically
+meaningful motions. There are two common approaches:
+
+**Approach 1: CPG generates foot trajectories.** The CPG oscillator outputs
+are interpreted as desired foot positions in Cartesian space (e.g., the $x$
+component controls the forward swing, the $y$ component controls the lift
+height). Inverse kinematics then computes the required joint angles. This
+approach provides intuitive control over step length and height.
+
+**Approach 2: CPG directly drives joint angles.** Each oscillator output is
+mapped directly to a joint angle command through scaling and offset parameters.
+This is simpler but requires careful manual tuning of the mapping parameters
+to produce physically meaningful motions.
+
+A key limitation of CPG-based approaches is that they **do not inherently
+ensure physical balance**. Unlike ZMP-based or DCM-based methods (Chapters 3
+and 5), which explicitly compute dynamically stable trajectories, a CPG
+produces rhythmic patterns that may or may not keep the robot balanced. In
+practice, CPG controllers are often combined with balance feedback loops or
+used as reference trajectory generators for model-based controllers.
+
 ## Advantages of CPG Control
 
 1. **Robustness**: inherently stable rhythmic patterns
@@ -186,6 +299,23 @@ for name, freq in speeds:
 3. **Low-dimensional**: few parameters control complex motions
 4. **Sensory integration**: feedback naturally modulates the rhythm
 5. **Distributed**: no central computation bottleneck
+
+### Connections to Other Topics
+
+- **Reinforcement Learning (Chapter 11)**: CPGs are sometimes used as the
+  action space for RL policies. Instead of learning raw joint torques (high-
+  dimensional), the RL agent learns CPG parameters (low-dimensional), which
+  provides a structured representation that is easier to explore and leads to
+  smoother motions.
+- **Passive Dynamic Walking (Chapter 4)**: Passive walkers exhibit limit-cycle
+  behavior, where the walking pattern is an attractor in state space. CPGs
+  replicate this limit-cycle structure in a controlled setting, enabling the
+  same energy-efficient periodic gaits but with the ability to modulate speed
+  and gait parameters.
+- **Whole-Body Control (Chapter 8)**: CPG outputs can serve as reference
+  trajectories for whole-body controllers. The CPG generates the desired
+  rhythmic motion pattern, and the whole-body controller ensures that the
+  robot tracks this pattern while satisfying balance and contact constraints.
 
 ## References
 

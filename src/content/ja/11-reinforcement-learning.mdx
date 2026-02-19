@@ -2,10 +2,31 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { RLLoopDiagram } from "@/components/diagrams/RLDiagram";
+import { PPODiagram } from "@/components/diagrams/PPODiagram";
 
 # 歩行のための強化学習
 
 強化学習 (RL) は、シミュレーション内での試行錯誤を通じてロボットが歩行行動を発見できるようにすることで、二足歩行に革命をもたらしました。手動で設計されたコントローラを凌駕することも少なくありません。
+
+## なぜ歩行に強化学習を使うのか?
+
+歩行には複雑な接触力学が関わります。足が地面と衝突し、摩擦力が不連続に変化し、ロボットは多数の関節を同時に協調させなければなりません。これらの課題により、従来のアプローチだけでは歩行問題を解決することが困難です。
+
+**モデルベース手法**（第3章のZMP、第10章のMPC）は正確な動力学モデルを必要とします。しかし実際には、地面との接触、関節摩擦、アクチュエータの動特性を正確にモデル化することは困難です。小さなモデル誤差が蓄積し、ロボットの転倒につながります。
+
+**RLはシミュレータとの相互作用から直接学習**します。明示的なモデルは不要です。方策は試行錯誤を通じて何がうまくいくかを発見します。これによりRLは以下のことが可能になります:
+
+- 解析的にモデル化しにくい複雑な接触力学を扱える
+- エンジニアが思いつかないような創造的な歩行戦略を発見できる
+- ドメインランダマイゼーションと組み合わせることで、多様な地形や外乱に汎化できる
+
+**ただし、RLには重要な制約があります:**
+
+- **サンプル非効率性**: 学習に数十億のシミュレーションステップが必要になることがある
+- **報酬エンジニアリング**: 不適切な報酬設計は不自然または搾取的な行動を生む
+- **Sim-to-Realギャップ**: シミュレーションで学習した方策が実機で失敗する可能性がある（第12章参照）
+
+実際のトレードオフは次の通りです: RLは汎用的だがデータを大量に必要とし、モデルベース手法はデータ効率的だがモデルの精度に制限されます。現代のアプローチでは、両者を組み合わせることが増えています（末尾の「他の章との関連」を参照）。
 
 ## 歩行のためのMDP定式化
 
@@ -21,6 +42,8 @@ import { RLLoopDiagram } from "@/components/diagrams/RLDiagram";
 $$
 J(\theta) = \mathbb{E}_{\pi_\theta}\left[\sum_{t=0}^{T} \gamma^t r(s_t, a_t)\right]
 $$
+
+ここで $\gamma \in [0, 1)$ は割引率であり、エージェントが即時報酬と将来の報酬のどちらをどれだけ重視するかを制御します。
 
 <RLLoopDiagram />
 
@@ -39,11 +62,24 @@ $$
 | 生存 | $r_a = +1$ per step | 生存の促進 |
 | スタイル | $r_s = -\|q - q_{ref}\|^2$ | 参照動作への追従 |
 
-### よくある落とし穴
+### 報酬エンジニアリングの技術
 
-- **報酬ハッキング**: ロボットが予想外の方法で報酬を最大化する（例: 歩行ではなく滑走する）
-- **スパース報酬**: 「目標に到達する」だけでは学習信号が不十分
-- **過度な制約**: スタイルペナルティが多すぎると探索を妨げる
+報酬設計は学習される行動に大きな影響を与えます。報酬の重みをわずかに変えるだけで、まったく異なる歩容が生成されることがあります。
+
+**よくある失敗パターン:**
+
+- **速度報酬が大きすぎる**: ロボットが前のめりになり、数歩で転倒する
+- **エネルギーペナルティがない**: 過大なトルクを使用し、非現実的でハードウェアを損傷する動作になる
+- **滑らかさペナルティがない**: トルクが急激に振動するぎこちない歩容になる
+- **報酬ハッキング**: ロボットが予想外の方法で報酬を最大化する（例: 歩行ではなく滑走する、振動して生存ボーナスを稼ぐ）
+- **スパース報酬**: 「目標に到達する」だけでは、エージェントが歩行を発見するための学習信号が不十分
+
+**実践的なガイドライン:**
+
+1. 単純な報酬（生存ボーナス + 前進速度）から始めて、基本的な動作を確認する
+2. ペナルティ項を段階的に追加する（エネルギー、滑らかさ、関節限界）
+3. カリキュラム学習を用いてタスクの難易度を徐々に上げる
+4. モーション模倣報酬の使用を検討する（下記のDeepMimicセクション参照）ことで、設計の問題の大半を回避できる
 
 ## 方策勾配法
 
@@ -57,7 +93,43 @@ $$
 
 ここで $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ は確率比、$A_t$ はアドバンテージ推定値です。
 
-PPOはサンプル効率と安定性のバランスが良いため、広く使われています。
+**なぜクリッピングが必要か?** クリッピングがないと、大きな方策更新が行動を劇的に変化させ、壊滅的な性能低下を引き起こす可能性があります。クリップ範囲（通常 $\epsilon = 0.2$）は、旧方策の周りの「信頼領域」を定義します。新しい方策が旧方策から離れすぎようとすると、クリップされた目的関数が勾配のさらなる推進を止めます。これにより、安定した漸進的な方策改善が保証されます。
+
+### 汎化アドバンテージ推定 (GAE)
+
+アドバンテージ $A_t$ は「この行動が期待と比べてどれだけ良かったか」を推定します。GAEは多ステップTD誤差の重み付き組み合わせを使って計算します:
+
+$$
+A_t^{GAE} = \sum_{l=0}^{T-t} (\gamma \lambda)^l \delta_{t+l}
+$$
+
+ここで各ステップのTD誤差は次のように定義されます:
+
+$$
+\delta_t = r_t + \gamma V(s_{t+1}) - V(s_t)
+$$
+
+パラメータ $\lambda \in [0, 1]$ はバイアス-バリアンスのトレードオフを制御します:
+
+- $\lambda = 0$: 1ステップTD誤差 $\delta_t$ のみを使用。低バリアンスだが高バイアス（価値関数の精度に大きく依存）。
+- $\lambda = 1$: 完全なモンテカルロリターンを使用。低バイアスだが高バリアンス（個々の軌道のノイズに敏感）。
+- 実際には $\lambda = 0.95$ が一般的な選択で、両者のバランスを取ります。
+
+<PPODiagram />
+
+### On-Policy vs Off-Policy
+
+学習データの収集と使用には、2つの基本的なアプローチがあります:
+
+**PPO (on-policy):** 軌道のバッチを収集し、方策を更新した後、データを破棄します。シンプルで安定ですが、各イテレーションごとに新しいデータが必要です。
+
+**SAC (Soft Actor-Critic, off-policy):** すべての経験をリプレイバッファに保存し、多くの更新にわたって古いデータを再利用します。サンプル効率は高いですが、古いデータが現在の方策を反映しない場合があるため、チューニングが難しくなります。
+
+**歩行制御ではPPOがより一般的な理由:**
+
+1. 数千の並列シミュレーション環境にわたる並列化が容易
+2. 学習がより安定で、ハイパーパラメータのチューニングが少なくて済む
+3. GPU高速化シミュレータ（例: IsaacGym）は4096以上の並列環境を実行でき、PPOのサンプル非効率性が実用上の問題になりにくい
 
 <CodeEditor
   initialCode={`import math
@@ -65,6 +137,14 @@ import random
 
 # Simplified RL for a 1D walking task
 # (CartPole-like balance + forward velocity)
+#
+# Note: This example uses a simple Evolution Strategy (ES) for
+# demonstration. ES is not a gradient-based RL algorithm, but it
+# shares the same optimization goal: find policy parameters that
+# maximize cumulative reward. True PPO uses policy gradient
+# computation with neural network backpropagation, which requires
+# deep learning libraries (PyTorch, JAX) not available in this
+# browser environment.
 
 random.seed(42)
 
@@ -182,7 +262,7 @@ $$
 r_{imitation} = w_p \exp(-\|q - q^{ref}\|^2) + w_v \exp(-\|\dot{q} - \dot{q}^{ref}\|^2)
 $$
 
-これにより、方策を自然な歩容に導くことで、学習速度と動作品質が大幅に向上します。
+これにより、方策を自然な歩容に導くことで、学習速度と動作品質が大幅に向上します。モーション模倣は報酬エンジニアリングの困難の大半も回避します。参照動作が「良い歩行」とは何かを暗黙的に定義するため、速度、エネルギー、スタイルの報酬重みを手動でバランスする必要がなくなります。
 
 ## カリキュラム学習
 
@@ -194,11 +274,22 @@ $$
 4. **外部摂動**: 押し出しからの回復
 5. **アジャイル行動**: 走行、ジャンプ、旋回
 
+各段階は前の段階で学習した方策の上に構築されます。重要な洞察は、簡単なタスクだけで学習した方策は汎化性能が低く、一方で難しいタスクに直接取り組むと報酬信号がスパースすぎてエージェントが有用な行動を発見できないということです。
+
+## 他の章との関連
+
+- **Sim-to-Real転移（第12章）**: RL方策はシミュレーションで学習され、実機に転移されます。ドメインランダマイゼーションとシステム同定が、sim-to-realギャップを埋めるために不可欠です。
+- **CPG（第7章）**: 中枢パターン生成器はRLに構造化された行動空間を提供できます。生のジョイントトルクを学習する代わりに、方策がCPGパラメータ（周波数、振幅）を出力することで、探索空間を削減できます。
+- **MPC（第10章）**: MPCのようなモデルベース手法はRLと組み合わせることができます。例えば、学習されたダイナミクスモデルでMPCの解析モデルを置き換えたり、MPCのベースラインの上にRLで残差補正を学習したりできます。
+- **トレンド**: 現代の歩行システムは、モデルベースの構造と学習された要素を組み合わせたハイブリッドアプローチを採用する傾向が強まっています。純粋なRLと純粋なモデルベース手法は、それぞれ相補的な強みを持っています。
+
 ## 参考文献
 
 - X. Peng et al., "[DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based Character Skills](https://arxiv.org/abs/1804.02717)," *ACM TOG*, 2018.
 - Z. Xie et al., "[Feedback Control For Cassie With Deep Reinforcement Learning](https://arxiv.org/abs/1803.05580)," *Proc. IROS*, 2018.
 - J. Schulman et al., "[Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)," *arXiv*, 2017.
+- J. Schulman et al., "[High-Dimensional Continuous Control Using Generalized Advantage Estimation](https://arxiv.org/abs/1506.02438)," *ICLR*, 2016.
+- T. Haarnoja et al., "[Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning](https://arxiv.org/abs/1801.01290)," *ICML*, 2018.
 
 <InteractiveDemo title="RL Training Visualization">
   <p className="text-sm text-gray-500">

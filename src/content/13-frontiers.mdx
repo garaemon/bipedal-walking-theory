@@ -1,138 +1,361 @@
 import { MathBlock } from "@/components/math/MathBlock";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
+import { FrontiersTaxonomyDiagram } from "@/components/diagrams/FrontiersTaxonomyDiagram";
 
 # Frontiers of Bipedal Locomotion
 
 This chapter surveys cutting-edge research pushing the boundaries of
 bipedal walking and running, from transformer-based controllers to
-agile humanoid skills.
+agile humanoid skills. We also trace how the classical foundations
+covered in earlier chapters remain essential building blocks in these
+frontier systems.
+
+<FrontiersTaxonomyDiagram />
 
 ## Transformer-Based Locomotion Controllers
 
-Recent work applies transformer architectures to locomotion:
+Recent work applies transformer architectures to locomotion. Unlike
+standard MLP policies that only see the current observation, transformers
+operate on a **history window** of states and can learn which past
+observations are relevant for the current decision.
 
-### Locomotion Transformers
+### How Transformers Are Applied to Locomotion
 
-Instead of reactive policies, transformers process **sequences of
-observations** to make decisions:
+The core idea is to treat the state history as a sequence of tokens, much
+like words in a sentence. Given a history window of length $H$:
 
 $$
-a_t = f_{transformer}(o_{t-H}, o_{t-H+1}, \ldots, o_t)
+\mathbf{s}_{t-H},\; \mathbf{s}_{t-H+1},\; \ldots,\; \mathbf{s}_t
 $$
 
-Key advantages:
-- **Long-horizon reasoning**: attend to relevant past events
-- **In-context adaptation**: adapt to new terrains without retraining
-- **Multi-task learning**: single model handles diverse locomotion tasks
+Each state $\mathbf{s}_i$ (containing joint angles, velocities, body
+orientation, etc.) is projected into a **token embedding** via a learned
+linear layer:
+
+$$
+\mathbf{z}_i = W_{\text{proj}} \, \mathbf{s}_i + \mathbf{b}_{\text{proj}}
+$$
+
+These embeddings are then processed by transformer layers with
+**self-attention**, which allows the model to learn which past states
+carry useful information for the current decision. Finally, the output
+at the last position yields the action:
+
+$$
+a_t = f_{\text{head}}(\text{TransformerEncoder}(\mathbf{z}_{t-H}, \ldots, \mathbf{z}_t))
+$$
+
+This is fundamentally different from how transformers are used in large
+language models. There is no autoregressive generation of a sequence:
+the model performs a **single forward pass** to predict one action at each
+control step (typically 50-100 Hz).
+
+### Key Advantages Over MLP Policies
+
+- **Variable-length history**: the attention mechanism naturally handles
+  different history lengths, unlike fixed-size observation stacking
+- **Temporal pattern learning**: self-attention can discover that, for
+  example, a foot contact event 10 steps ago predicts the current
+  ground reaction force
+- **In-context adaptation**: given enough history, the model implicitly
+  identifies terrain properties (friction, slope) without explicit
+  system identification
+- **Multi-task learning**: a single transformer model can handle walking,
+  turning, and speed changes by conditioning on a command token
 
 ### Cross-Embodiment Transfer
 
 Foundation models trained on diverse robot morphologies can transfer
-locomotion skills across different humanoid platforms.
+locomotion skills across different humanoid platforms. The key idea is
+to learn a shared latent space of locomotion behaviors, so a policy
+trained on one robot body can be adapted to another with minimal
+fine-tuning.
 
 ## Agile Humanoid Skills
 
-### Soccer
+### Multi-Agent Robot Soccer
 
-Humanoid robots playing soccer autonomously:
-- Dynamic kicking with whole-body coordination
-- Getting up from falls in diverse poses
-- Multi-agent coordination and strategy
-- Real-time vision-based opponent tracking
+Humanoid robots playing soccer autonomously represent one of the most
+demanding multi-agent locomotion challenges:
+
+- **Dynamic kicking** with whole-body coordination: the robot must
+  maintain balance while generating high foot velocities
+- **Getting up from falls** in diverse poses: learned recovery policies
+  handle arbitrary fallen configurations
+- **Multi-agent coordination**: robots must share a strategy, avoid
+  collisions, and coordinate passing without centralized control
+- **Real-time vision-based opponent tracking**: onboard cameras and
+  limited compute force efficient perception
+
+Haarnoja et al. (2024) demonstrated a full team of bipedal robots
+playing soccer using policies trained entirely in simulation with
+deep RL, then transferred to real hardware.
 
 ### Parkour
 
-Autonomous parkour requires:
-- **Perception**: real-time 3D terrain mapping
-- **Planning**: selecting feasible routes through obstacles
-- **Control**: high-force jumping, precise landing, recovery
-- **Timing**: split-second decisions during flight phases
+Autonomous parkour requires seamlessly combining perception, planning,
+and control:
+
+- **Perception**: real-time 3D terrain mapping from depth sensors
+- **Planning**: selecting feasible routes through obstacles such as gaps,
+  walls, and elevated platforms
+- **Control**: generating high-force jumps, precise landings, and
+  mid-air body reorientation
+- **Timing**: split-second decisions during flight phases when the robot
+  cannot change its trajectory
+
+Cheng et al. (2024) and Zhuang et al. (2023) demonstrated parkour on
+quadrupeds, and similar techniques are being extended to bipedal robots.
 
 ### Running and Jumping
 
 Agile bipedal running involves:
-- Flight phases (both feet off ground)
-- High-impact landing absorption
-- Dynamic stability beyond ZMP/DCM frameworks
+
+- **Flight phases** where both feet leave the ground, requiring ballistic
+  trajectory prediction
+- **High-impact landing absorption** through compliant joint control
+- **Dynamic stability** that goes beyond the ZMP/DCM frameworks designed
+  for walking, since the support polygon vanishes during flight
 
 ## Vision-Based Locomotion
 
-Replacing explicit terrain maps with end-to-end learned perception:
+Integrating vision into locomotion controllers enables robots to
+traverse complex terrain without prior maps. There are two main
+architectural approaches.
+
+### Approach 1: End-to-End Learning
+
+The policy directly maps proprioceptive data and raw camera images
+to actions:
 
 $$
-a_t = \pi_\theta(o^{proprio}_t, o^{visual}_t)
+a_t = \pi_\theta(\mathbf{o}^{\text{proprio}}_t, \mathbf{o}^{\text{visual}}_t)
 $$
 
-The policy directly maps proprioceptive data and camera images to actions.
+This approach is conceptually simple but requires large amounts of
+training data and struggles with generalization across lighting
+conditions and camera configurations.
 
-### Challenges
-- **Latency**: visual processing must be fast enough for reactive control
-- **Robustness**: handle lighting changes, occlusions, motion blur
-- **Generalization**: work on unseen terrains and environments
+### Approach 2: Perception Pipeline with Height Maps
 
-### Height Map Estimation
+A more modular approach separates perception from control:
 
-An intermediate representation approach:
-1. Estimate local terrain height map from depth camera
-2. Feed height map + proprioception to locomotion policy
-3. Separate perception training from locomotion training
+1. **Depth image to height map**: A depth camera captures the scene, and
+   the terrain around the robot is discretized into a 2D grid of height
+   values (e.g., a 20x20 grid with 5 cm resolution covering 1 m around
+   each foot).
+2. **Feature extraction**: A convolutional neural network (CNN) processes
+   the height map to extract terrain features such as step edges, slopes,
+   and gaps.
+3. **Policy input**: The extracted features are concatenated with
+   proprioceptive state and fed to the locomotion policy.
+4. **Separate training**: The perception module and locomotion policy can
+   be trained independently, simplifying each learning problem.
+
+### Managing Sensor Latency
+
+A critical practical challenge is **sensor latency**. Depth cameras
+typically operate at 30 Hz with 30-60 ms processing delay. During this
+delay, the robot continues moving, so the perceived terrain is already
+outdated when the controller receives it. Solutions include:
+
+- **State prediction**: use the robot's kinematic model to predict the
+  current state forward by the latency amount
+- **Observation delay randomization**: during training, randomly delay
+  visual observations to make the policy robust to variable latency
+- **Proprioceptive override**: when visual and proprioceptive
+  information conflict, trust proprioception for immediate balance
+
+### Real-World Results
+
+Vision-based locomotion has achieved impressive results on real hardware:
+- **ANYmal** (ETH Zurich): stair climbing and rough terrain traversal
+  using learned height map estimation
+- **Cassie** (Oregon State / Agility Robotics): outdoor walking over
+  varied terrain with depth cameras
+- These systems demonstrate that sim-to-real transfer (Chapter 12) is
+  mature enough for vision-in-the-loop deployment
 
 ## Large-Scale Training
 
-Modern approaches leverage massive computation:
+Modern locomotion learning relies on massive parallelism made possible by
+GPU-accelerated physics simulation.
+
+### GPU-Accelerated Physics Engines
+
+Traditional CPU-based simulators like MuJoCo or Bullet run one
+environment per CPU core. GPU-accelerated engines fundamentally change
+the scaling:
+
+- **IsaacGym** (NVIDIA): runs the entire simulation and policy forward
+  pass on a single GPU, avoiding CPU-GPU data transfer
+- **MJX** (MuJoCo XLA): compiles MuJoCo physics to XLA, enabling
+  JAX-based vectorized simulation
+- **Brax**: a differentiable physics engine written in JAX, optimized
+  for TPU/GPU parallelism
+
+### Why Parallelism Matters for RL
+
+The key insight is that for reinforcement learning, **more parallel
+environments is almost always more efficient** than training for a longer
+time with fewer environments. The reasons are:
 
 | Aspect | Scale |
 |--------|-------|
 | Parallel environments | 4,000 - 100,000 |
-| Training time | 10 min - 24 hours |
-| GPU | 1 - 64 GPUs |
-| Simulation steps | $10^9$ - $10^{11}$ |
+| Wall-clock training time | 10 min - 24 hours |
+| GPU resources | 1 - 64 GPUs |
+| Total simulation steps | $10^9$ - $10^{11}$ |
 
-The key enabler: GPU-accelerated physics simulation (IsaacGym, MuJoCo XLA,
-Brax) running thousands of environments in parallel.
+- **Batch efficiency**: all environments share the same GPU memory and
+  execute the same physics kernels, so doubling environments costs far
+  less than doubling compute
+- **Exploration diversity**: thousands of robots simultaneously explore
+  different states, dramatically improving sample coverage
+- **Reduced wall-clock time**: training that previously took days on
+  CPU clusters now completes in hours on a single GPU
+
+### Vectorized Environment Architecture
+
+In a vectorized setup, all $N$ robots are simulated as a single batched
+tensor operation. The state of all robots $\mathbf{S} \in \mathbb{R}^{N
+\times d}$ is updated simultaneously, and the policy evaluates all
+observations in one batched forward pass. This eliminates the overhead
+of Python loops and inter-process communication that plague CPU-based
+parallel training.
+
+## Loco-Manipulation
+
+Combining locomotion with object manipulation is one of the most
+challenging open problems, because **manipulation forces directly
+disturb walking balance**.
+
+### The Core Challenge
+
+When a humanoid robot pushes, pulls, or carries an object, the contact
+forces from manipulation act as external disturbances on the walking
+controller. The robot must:
+
+- **Anticipate balance disturbance**: predict how grasping and moving
+  an object will shift its center of mass and generate reaction forces
+- **Coordinate whole-body motion**: plan arm trajectories and leg
+  stepping simultaneously, since moving the arms changes the effective
+  inertia of the upper body
+- **Maintain stability margins**: ensure the ZMP (Chapter 3) remains
+  within the support polygon even as manipulation forces vary
+
+### Current Approaches
+
+State-of-the-art methods train end-to-end policies that output
+whole-body motions, including both arm and leg joint commands:
+
+- **Hierarchical control**: a high-level policy selects manipulation and
+  locomotion sub-goals, while a low-level whole-body controller (Chapter
+  8) generates feasible joint trajectories
+- **Unified policies**: a single neural network outputs all joint
+  commands simultaneously, learning the coupling between arm movements
+  and balance
+- **Contact-aware planning**: the policy is trained with diverse object
+  interactions so it learns to handle variable friction and mass
+
+### Examples in Recent Research
+
+- Humanoid robots carrying boxes of varying weight while walking on flat
+  and uneven terrain
+- Opening doors: the robot must coordinate a pulling/pushing force at
+  the hand with stepping motion to avoid falling backward/forward
+- Using tools: inserting keys, pressing buttons, and manipulating
+  levers while maintaining balance
+
+## Foundations Used in Frontier Systems
+
+A crucial insight for students is that frontier research does **not**
+discard classical methods. Instead, the trend is toward **hybrid
+architectures** that combine classical structure with learned components.
+
+### Classical Approaches Still in Use
+
+- **ZMP (Chapter 3)**: even in learning-based systems, ZMP constraints
+  are used to define stable regions and as reward terms during RL
+  training
+- **DCM (Chapter 6)**: the Divergent Component of Motion is used for
+  push recovery modules that complement learned walking policies
+- **Whole-Body Control (Chapter 8)**: QP-based controllers serve as
+  the low-level layer under learned high-level policies. The neural
+  network outputs desired task-space commands, and the QP solver
+  converts these to feasible joint torques respecting contact and
+  torque limits
+- **HZD (Chapter 9)**: Hybrid Zero Dynamics provides mathematically
+  structured constraints that can regularize learning-based
+  optimization, ensuring the learned gaits respect physical periodicity
+
+### The Core Training Pipeline
+
+- **Reinforcement Learning (Chapter 11)** provides the optimization
+  framework: define a reward function encoding desired behavior, then
+  train a policy via PPO or SAC
+- **Sim-to-Real Transfer (Chapter 12)** bridges the simulation-reality
+  gap through domain randomization, system identification, and
+  adaptation modules
+- Together, these form the backbone of nearly all frontier locomotion
+  research
+
+### The Hybrid Architecture Pattern
+
+The dominant pattern in recent work is:
+
+$$
+\text{Learned high-level policy} \;\xrightarrow{\text{task commands}}\;
+\text{Classical low-level controller (WBC/QP)}
+$$
+
+This layered approach combines the adaptability of learning with the
+safety guarantees and physical consistency of classical control. The
+learned policy handles terrain adaptation and high-level decisions,
+while the classical controller ensures feasible and safe joint-level
+execution.
+
+## Timeline of Key Breakthroughs
+
+| Year | Milestone | Significance |
+|------|-----------|--------------|
+| 1969 | ZMP concept (Vukobratovic) | Provided the first rigorous stability criterion for bipedal walking, enabling model-based gait generation. |
+| 1990 | Passive dynamic walking (McGeer) | Demonstrated that walking can emerge from mechanics alone without active control, inspiring energy-efficient designs. |
+| 2001 | 3D-LIPM for walking (Kajita) | Reduced the complex 3D walking problem to a tractable linear model, enabling real-time gait planning. |
+| 2003 | Preview control for ZMP (Kajita) | Allowed walkers to anticipate future reference ZMP trajectories, producing smooth and stable gaits. |
+| 2006 | Capture point / DCM (Pratt) | Introduced a one-step stability criterion that simplified push recovery and balance control. |
+| 2014 | HZD on hardware (Ames) | Validated the mathematical framework of Hybrid Zero Dynamics on a physical bipedal robot (DURUS). |
+| 2018 | DeepMimic (Peng) | Showed that RL agents can learn highly dynamic and realistic motions by imitating motion capture data. |
+| 2019 | Sim-to-real Cassie (Xie) | First successful sim-to-real transfer of RL-trained walking policies on the Cassie bipedal robot. |
+| 2023 | Real-world humanoid RL (Radosavovic) | Demonstrated end-to-end RL-trained locomotion on a full-size humanoid robot in outdoor environments. |
+| 2024 | Agile humanoid skills (Haarnoja, Cheng) | Achieved humanoid robot soccer and parkour through large-scale RL training with sim-to-real transfer. |
+| 2025 | Foundation models for locomotion | Cross-embodiment transformer models that generalize locomotion skills across different robot morphologies. |
 
 ## Open Problems
 
-### 1. Whole-Body Loco-Manipulation
-Combining walking with object manipulation requires coordinating
-locomotion stability with arm/hand forces.
-
-### 2. Energy Efficiency
+### 1. Energy Efficiency
 RL-trained gaits often use 3-5x more energy than passive dynamic walkers.
-How can we combine learning with energy-efficient design principles?
+How can we combine learning with energy-efficient design principles such
+as passive dynamics (Chapter 2)?
 
-### 3. Long-Horizon Planning
+### 2. Long-Horizon Planning
 Current controllers are reactive. Real-world navigation requires planning
 minutes ahead: choosing routes, anticipating terrain changes, and
 managing energy budgets.
 
-### 4. Robust Perception
+### 3. Robust Perception
 Operating in rain, snow, darkness, and cluttered environments with
-unreliable sensors remains challenging.
+unreliable sensors remains challenging for vision-based systems.
 
-### 5. Safety and Verification
-How to guarantee a learned controller will never take dangerous actions?
-Formal verification of neural network policies is an open research area.
+### 4. Safety and Verification
+How can we guarantee that a learned controller will never take dangerous
+actions? Formal verification of neural network policies is an open
+research area.
 
-### 6. Human-Robot Interaction
+### 5. Human-Robot Interaction
 Walking alongside, carrying, or physically assisting humans requires
-understanding human intention and ensuring safety.
-
-## Timeline of Key Breakthroughs
-
-| Year | Milestone |
-|------|-----------|
-| 1969 | ZMP concept (Vukobratovic) |
-| 1990 | Passive dynamic walking (McGeer) |
-| 2001 | 3D-LIPM for walking (Kajita) |
-| 2003 | Preview control for ZMP (Kajita) |
-| 2006 | Capture point (Pratt) |
-| 2014 | HZD on hardware (Ames) |
-| 2018 | DeepMimic (Peng) |
-| 2019 | Sim-to-real Cassie (Xie) |
-| 2023 | Real-world humanoid RL (Radosavovic) |
-| 2024 | Agile humanoid skills (Haarnoja, Cheng) |
-| 2025 | Foundation models for locomotion |
+understanding human intention and ensuring safety through compliant
+control.
 
 ## References
 
@@ -140,6 +363,9 @@ understanding human intention and ensuring safety.
 - I. Radosavovic et al., "[Humanoid Locomotion as Next Token Prediction](https://arxiv.org/abs/2402.19469)," *arXiv*, 2024.
 - Z. Zhuang et al., "[Robot Parkour Learning](https://arxiv.org/abs/2309.05665)," *CoRL*, 2023.
 - X. Cheng et al., "[Extreme Parkour with Legged Robots](https://arxiv.org/abs/2309.14341)," *ICRA*, 2024.
+- J. Lee et al., "[Learning Quadrupedal Locomotion over Challenging Terrain](https://arxiv.org/abs/2010.11251)," *Science Robotics*, 2020.
+- T. Miki et al., "[Learning robust perceptive locomotion for quadrupedal robots in the wild](https://arxiv.org/abs/2201.08117)," *Science Robotics*, 2022.
+- V. Makoviychuk et al., "[Isaac Gym: High Performance GPU-Based Physics Simulation For Robot Learning](https://arxiv.org/abs/2108.10470)," *NeurIPS*, 2021.
 
 <InteractiveDemo title="Research Frontier">
   <p className="text-sm text-gray-500">
