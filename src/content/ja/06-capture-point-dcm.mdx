@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { CapturePointDiagram, DCMWalkingDiagram } from "@/components/diagrams/CapturePointDiagram";
+import { DCMPhaseDiagram } from "@/components/diagrams/DCMPhaseDiagram";
 
 # キャプチャポイントとDCM
 
@@ -27,7 +28,7 @@ import { CapturePointDiagram, DCMWalkingDiagram } from "@/components/diagrams/Ca
 
 DCMはキャプチャポイントと数学的に同一です。この名称は、LIPMのダイナミクスを**安定**成分と**不安定**成分に分解することに由来します。
 
-LIPMの方程式 $\ddot{x} = \omega^2(x - r)$（$r$ はCoPとする）から、以下を定義します:
+LIPMの方程式 $\ddot{x} = \omega^2(x - r)$（$r$ はCoPとする）から出発します。これは二次系です。分解するために、新しい座標を定義します:
 
 $$
 \xi = x + \frac{\dot{x}}{\omega} \quad \text{(DCM / unstable component)}
@@ -37,15 +38,25 @@ $$
 \zeta = x - \frac{\dot{x}}{\omega} \quad \text{(stable component)}
 $$
 
+$x = \frac{1}{2}(\xi + \zeta)$ かつ $\dot{x} = \frac{\omega}{2}(\xi - \zeta)$ であるため、これは可逆な座標変換です。
+
 ### DCMダイナミクス
 
-DCMは以下に従って変化します:
+$\xi = x + \dot{x}/\omega$ を微分し、$\ddot{x} = \omega^2(x - r)$ を代入すると:
 
 $$
-\dot{\xi} = \omega(\xi - r)
+\dot{\xi} = \dot{x} + \frac{\ddot{x}}{\omega} = \dot{x} + \omega(x - r) = \omega\left(x + \frac{\dot{x}}{\omega} - r\right) = \omega(\xi - r)
 $$
 
-これは一次の**不安定**系です: $\xi \neq r$ の場合、DCMは指数的に発散します。CoP $r$ が制御入力として機能します。
+同様に $\dot{\zeta} = -\omega(\zeta - r)$ が得られます。二次のLIPMが二つの**独立な**一次系に分解されました:
+- $\dot{\xi} = +\omega(\xi - r)$: **不安定**（$r$ から発散する）
+- $\dot{\zeta} = -\omega(\zeta - r)$: **安定**（$r$ に収束する）
+
+安定成分 $\zeta$ は自然に収束するので、制御器は不安定なDCM $\xi$ のみを管理すればよいのです。これがDCMベースの制御が効果的な理由です。
+
+<DCMPhaseDiagram />
+
+CoP $r$ がDCMの制御入力として機能します。
 
 ### DCMによる重心ダイナミクス
 

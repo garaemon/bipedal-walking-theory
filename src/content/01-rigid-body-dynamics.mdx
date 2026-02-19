@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { RigidBodyDiagram, DoublePendulumDiagram } from "@/components/diagrams/RigidBodyDiagram";
+import { FrictionConeDiagram } from "@/components/diagrams/FrictionConeDiagram";
 
 # Rigid Body Dynamics
 
@@ -47,7 +48,30 @@ I_{xx} & -I_{xy} & -I_{xz} \\
 $$
 
 The diagonal elements are **moments of inertia** and the off-diagonal elements are
-**products of inertia**.
+**products of inertia**. Each entry is defined by integrating over
+the body's mass distribution. For example, consider a differential mass
+element $dm$ located at position $(x, y, z)$ within the body. The moment
+of inertia about the $x$-axis is:
+
+$$
+I_{xx} = \int (y^2 + z^2) \, dm
+$$
+
+The integrand $(y^2 + z^2)$ is the squared distance from the $x$-axis,
+so $I_{xx}$ measures how far the mass is spread from that axis. Similarly:
+
+$$
+I_{yy} = \int (x^2 + z^2) \, dm, \quad I_{zz} = \int (x^2 + y^2) \, dm
+$$
+
+The off-diagonal **products of inertia** capture mass asymmetry:
+
+$$
+I_{xy} = \int xy \, dm, \quad I_{xz} = \int xz \, dm, \quad I_{yz} = \int yz \, dm
+$$
+
+When the body has symmetry (e.g., a cylinder aligned with an axis),
+these product terms vanish and the inertia tensor becomes diagonal.
 
 For a solid cylinder of mass $m$, radius $r$, and length $h$ (common approximation
 for robot limb segments):
@@ -135,11 +159,26 @@ The mass matrix $M(\mathbf{q})$ has important properties:
 
 ### Coriolis Matrix
 
-The Coriolis matrix can be computed from **Christoffel symbols**:
+The Coriolis matrix can be computed from **Christoffel symbols of the
+first kind**:
 
 $$
 C_{ij} = \sum_{k=1}^{n} c_{ijk} \dot{q}_k, \quad c_{ijk} = \frac{1}{2}\left(\frac{\partial M_{ij}}{\partial q_k} + \frac{\partial M_{ik}}{\partial q_j} - \frac{\partial M_{jk}}{\partial q_i}\right)
 $$
+
+This particular combination of partial derivatives is not arbitrary. It
+is chosen so that $\dot{M} - 2C$ is **skew-symmetric**, i.e.,
+$\mathbf{x}^T (\dot{M} - 2C) \mathbf{x} = 0$ for all $\mathbf{x}$.
+This property guarantees that the rate of change of kinetic energy
+equals the power input by external forces:
+
+$$
+\frac{d}{dt}\left(\frac{1}{2}\dot{\mathbf{q}}^T M \dot{\mathbf{q}}\right) = \dot{\mathbf{q}}^T \boldsymbol{\tau} - \dot{\mathbf{q}}^T \mathbf{g}
+$$
+
+The Coriolis terms redistribute energy between joints but do not create
+or destroy it. This **passivity property** is fundamental for proving
+stability of many robot controllers.
 
 ## Forward and Inverse Dynamics
 
@@ -167,7 +206,21 @@ $$
 M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g} = \boldsymbol{\tau} + \mathbf{J}_c^T \mathbf{f}_c
 $$
 
-where $\mathbf{J}_c$ is the contact Jacobian and $\mathbf{f}_c$ is the contact force vector.
+where $\mathbf{f}_c$ is the contact force vector and $\mathbf{J}_c$ is
+the **contact Jacobian**. The contact Jacobian relates joint velocities
+to the velocity of the contact point:
+
+$$
+\mathbf{v}_c = \mathbf{J}_c(\mathbf{q}) \, \dot{\mathbf{q}}
+$$
+
+where $\mathbf{v}_c$ is the linear velocity of the contact point in
+Cartesian space. The transpose $\mathbf{J}_c^T$ maps contact forces in
+Cartesian space back to equivalent joint torques, following the principle
+of virtual work: the power at the contact
+($\mathbf{f}_c^T \mathbf{v}_c$) must equal the power at the joints
+($\boldsymbol{\tau}_c^T \dot{\mathbf{q}}$), giving
+$\boldsymbol{\tau}_c = \mathbf{J}_c^T \mathbf{f}_c$.
 
 ### Coulomb Friction Model
 
@@ -179,6 +232,8 @@ $$
 
 where $\mu$ is the friction coefficient. This constraint defines a **friction cone**.
 For stable walking, the ground reaction force must remain inside the friction cone.
+
+<FrictionConeDiagram />
 
 ## Example: Double Pendulum
 

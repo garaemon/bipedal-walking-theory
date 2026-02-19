@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { RigidBodyDiagram, DoublePendulumDiagram } from "@/components/diagrams/RigidBodyDiagram";
+import { FrictionConeDiagram } from "@/components/diagrams/FrictionConeDiagram";
 
 # 剛体力学
 
@@ -46,7 +47,25 @@ I_{xx} & -I_{xy} & -I_{xz} \\
 \end{bmatrix}
 $$
 
-対角要素は**慣性モーメント**、非対角要素は**慣性乗積**です。
+対角要素は**慣性モーメント**、非対角要素は**慣性乗積**です。各要素は物体の質量分布にわたる積分として定義されます。例えば、物体内の位置 $(x, y, z)$ にある微小質量要素 $dm$ を考えます。$x$ 軸まわりの慣性モーメントは:
+
+$$
+I_{xx} = \int (y^2 + z^2) \, dm
+$$
+
+被積分関数 $(y^2 + z^2)$ は $x$ 軸からの距離の二乗であり、$I_{xx}$ はその軸からの質量の広がりを測定します。同様に:
+
+$$
+I_{yy} = \int (x^2 + z^2) \, dm, \quad I_{zz} = \int (x^2 + y^2) \, dm
+$$
+
+非対角の**慣性乗積**は質量分布の非対称性を捉えます:
+
+$$
+I_{xy} = \int xy \, dm, \quad I_{xz} = \int xz \, dm, \quad I_{yz} = \int yz \, dm
+$$
+
+物体が対称性を持つ場合（例: 軸に沿った円柱）、これらの乗積項は消え、慣性テンソルは対角行列になります。
 
 質量 $m$、半径 $r$、長さ $h$ の中実円柱（ロボットの肢セグメントの一般的な近似）の場合:
 
@@ -133,11 +152,19 @@ $n$ 個の関節を持つロボットの関節空間における運動方程式�
 
 ### コリオリ行列
 
-コリオリ行列は**クリストッフェル記号**から計算できます:
+コリオリ行列は**第一種クリストッフェル記号**から計算できます:
 
 $$
 C_{ij} = \sum_{k=1}^{n} c_{ijk} \dot{q}_k, \quad c_{ijk} = \frac{1}{2}\left(\frac{\partial M_{ij}}{\partial q_k} + \frac{\partial M_{ik}}{\partial q_j} - \frac{\partial M_{jk}}{\partial q_i}\right)
 $$
+
+この偏微分の特定の組み合わせは恣意的なものではありません。$\dot{M} - 2C$ が**歪対称**（すなわち、すべての $\mathbf{x}$ に対して $\mathbf{x}^T (\dot{M} - 2C) \mathbf{x} = 0$）となるように選ばれています。この性質により、運動エネルギーの変化率が外力による仕事率に等しいことが保証されます:
+
+$$
+\frac{d}{dt}\left(\frac{1}{2}\dot{\mathbf{q}}^T M \dot{\mathbf{q}}\right) = \dot{\mathbf{q}}^T \boldsymbol{\tau} - \dot{\mathbf{q}}^T \mathbf{g}
+$$
+
+コリオリ項は関節間でエネルギーを再配分しますが、エネルギーの生成も消滅もしません。この**受動性**は多くのロボット制御器の安定性証明の基礎となります。
 
 ## 順動力学と逆動力学
 
@@ -165,7 +192,13 @@ $$
 M(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g} = \boldsymbol{\tau} + \mathbf{J}_c^T \mathbf{f}_c
 $$
 
-ここで、$\mathbf{J}_c$ は接触ヤコビアン、$\mathbf{f}_c$ は接触力ベクトルです。
+ここで、$\mathbf{f}_c$ は接触力ベクトル、$\mathbf{J}_c$ は**接触ヤコビアン**です。接触ヤコビアンは関節速度と接触点の速度を関係づけます:
+
+$$
+\mathbf{v}_c = \mathbf{J}_c(\mathbf{q}) \, \dot{\mathbf{q}}
+$$
+
+ここで $\mathbf{v}_c$ はデカルト空間における接触点の線速度です。転置 $\mathbf{J}_c^T$ は仮想仕事の原理に基づき、デカルト空間の接触力を等価な関節トルクに写像します。接触点での仕事率（$\mathbf{f}_c^T \mathbf{v}_c$）と関節での仕事率（$\boldsymbol{\tau}_c^T \dot{\mathbf{q}}$）が等しいことから、$\boldsymbol{\tau}_c = \mathbf{J}_c^T \mathbf{f}_c$ が得られます。
 
 ### クーロン摩擦モデル
 
@@ -177,6 +210,8 @@ $$
 
 ここで、$\mu$ は摩擦係数です。この拘束条件は**摩擦錐**を定義します。
 安定した歩行のためには、地面反力が摩擦錐の内部に留まる必要があります。
+
+<FrictionConeDiagram />
 
 ## 例: 二重振子
 

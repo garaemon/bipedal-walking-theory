@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { CapturePointDiagram, DCMWalkingDiagram } from "@/components/diagrams/CapturePointDiagram";
+import { DCMPhaseDiagram } from "@/components/diagrams/DCMPhaseDiagram";
 
 # Capture Point and DCM
 
@@ -34,7 +35,9 @@ and $\omega = \sqrt{g/z_c}$ is the LIPM natural frequency.
 The DCM is mathematically identical to the capture point. The name comes
 from decomposing LIPM dynamics into **stable** and **unstable** components.
 
-From the LIPM equation $\ddot{x} = \omega^2(x - r)$ (where $r$ is the CoP), define:
+Start from the LIPM equation $\ddot{x} = \omega^2(x - r)$ (where $r$ is
+the CoP). This is a second-order system. To decouple it, rewrite it as
+two first-order equations by defining new coordinates:
 
 $$
 \xi = x + \frac{\dot{x}}{\omega} \quad \text{(DCM / unstable component)}
@@ -44,16 +47,31 @@ $$
 \zeta = x - \frac{\dot{x}}{\omega} \quad \text{(stable component)}
 $$
 
+Note that $x = \frac{1}{2}(\xi + \zeta)$ and
+$\dot{x} = \frac{\omega}{2}(\xi - \zeta)$, so this is an invertible
+change of coordinates.
+
 ### DCM Dynamics
 
-The DCM evolves according to:
+Differentiating $\xi = x + \dot{x}/\omega$ and substituting
+$\ddot{x} = \omega^2(x - r)$:
 
 $$
-\dot{\xi} = \omega(\xi - r)
+\dot{\xi} = \dot{x} + \frac{\ddot{x}}{\omega} = \dot{x} + \omega(x - r) = \omega\left(x + \frac{\dot{x}}{\omega} - r\right) = \omega(\xi - r)
 $$
 
-This is a first-order **unstable** system: if $\xi \neq r$, the DCM diverges
-exponentially. The CoP $r$ acts as the control input.
+Similarly, $\dot{\zeta} = -\omega(\zeta - r)$. The second-order LIPM has
+been decomposed into two **independent** first-order systems:
+- $\dot{\xi} = +\omega(\xi - r)$: **unstable** (diverges from $r$)
+- $\dot{\zeta} = -\omega(\zeta - r)$: **stable** (converges to $r$)
+
+The stable component $\zeta$ takes care of itself, so the controller
+only needs to manage the unstable DCM $\xi$. This is why DCM-based
+control is so effective.
+
+<DCMPhaseDiagram />
+
+The CoP $r$ acts as the control input for the DCM.
 
 ### CoM Dynamics in Terms of DCM
 

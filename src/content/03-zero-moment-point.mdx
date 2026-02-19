@@ -2,6 +2,7 @@ import { MathBlock } from "@/components/math/MathBlock";
 import { CodeEditor } from "@/components/code/CodeEditor";
 import { InteractiveDemo } from "@/components/visualization/InteractiveDemo";
 import { ZMPConceptDiagram, ZMPSupportPolygonDiagram } from "@/components/diagrams/ZMPDiagram";
+import { ZMPStabilityDiagram } from "@/components/diagrams/ZMPStabilityDiagram";
 
 # Zero Moment Point (ZMP)
 
@@ -13,6 +14,22 @@ ZMP theory has been the basis of most humanoid walking controllers for decades.
 
 The **Zero Moment Point** is the point on the ground where the net moment of all
 active forces (gravity and inertia) has zero horizontal components.
+
+### Derivation from First Principles
+
+To understand where the ZMP formula comes from, consider a point
+$P = (p_x, 0, 0)$ on the ground. Each mass $m_i$ at position
+$(x_i, y_i, z_i)$ experiences two forces: gravity $-m_i g \hat{z}$
+and inertial force $-m_i \mathbf{a}_i$ (d'Alembert's principle). The
+moment of these forces about point $P$ is:
+
+$$
+\boldsymbol{\tau}_P = \sum_{i=1}^{n} (\mathbf{r}_i - \mathbf{r}_P) \times (-m_i g \hat{z} - m_i \mathbf{a}_i)
+$$
+
+We define the ZMP as the point $P$ where the **horizontal components**
+of this moment vanish. Setting $\tau_{P,y} = 0$ (the moment about the
+$y$-axis) and solving for $p_x$ yields the ZMP formula.
 
 For a system of $n$ point masses, the ZMP position is:
 
@@ -61,6 +78,8 @@ A robot maintains dynamic balance if and only if:
 
 If the ZMP reaches the edge of the support polygon, the robot begins to tip over.
 This is the fundamental constraint used in walking pattern generation.
+
+<ZMPStabilityDiagram />
 
 ## ZMP vs CoP vs CoG
 
@@ -120,7 +139,14 @@ $$
 
 where $(x_{G_i}, z_{G_i})$ is the center of mass of link $i$, $I_{iy}$ is the
 moment of inertia about the $y$-axis, and $\ddot{\theta}_{iy}$ is the angular
-acceleration.
+acceleration. The term $I_{iy}\ddot{\theta}_{iy}$ represents the **angular
+momentum contribution** of each link: when a link rotates (e.g., swinging
+an arm), the rate of change of its angular momentum generates a moment
+about the ground contact. This shifts the ZMP away from where the
+point-mass model would predict. For slow walking, these angular momentum
+terms are small and often neglected (yielding the simpler point-mass
+ZMP formula). For dynamic motions like running or kicking, they become
+significant.
 
 ## ZMP-Based Walking Pattern Generation
 
