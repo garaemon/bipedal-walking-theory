@@ -249,7 +249,11 @@ plt.close()
 
 ## シミュレーション: 可操作度楕円体
 
-**可操作度楕円体**は、与えられたアーム姿勢でエンドエフェクタがどの方向に動きやすいかを視覚化します。ヤコビアンの特異値分解 $\mathbf{J} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^T$ から主軸（$\mathbf{U}$ の列）とその大きさ（特異値 $\sigma_i$）が得られます。楕円体の半軸は $\sigma_i \mathbf{u}_i$ です。吉川の**可操作度** $w = \sigma_1 \sigma_2 \cdots \sigma_m = \sqrt{\det(\mathbf{J}\mathbf{J}^T)}$ は全体的な器用さを定量化します: 特異点で $w = 0$、最も器用な姿勢で最大となります。
+**可操作度楕円体**は、与えられたアーム姿勢でエンドエフェクタがどの方向に動きやすいかを視覚化します。
+ヤコビアンの特異値分解 $\mathbf{J} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^T$ から主軸（$\mathbf{U}$ の列）とその大きさ（特異値 $\sigma_i$）が得られます。
+楕円体の半軸は $\sigma_i \mathbf{u}_i$ です。
+吉川の**可操作度** $w = \sigma_1 \sigma_2 \cdots \sigma_m = \sqrt{\det(\mathbf{J}\mathbf{J}^T)}$ は全体的な器用さを定量化します:
+特異点で $w = 0$、最も器用な姿勢で最大となります。
 
 <CodeEditor
   initialCode={`import math
