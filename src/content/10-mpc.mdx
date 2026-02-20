@@ -310,8 +310,7 @@ plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
 buf.seek(0)
 img = base64.b64encode(buf.read()).decode('utf-8')
 print('data:image/png;base64,' + img)
-plt.close()
-`}
+plt.close()`}
 />
 
 ## Simulation: Effect of Prediction Horizon
@@ -450,8 +449,7 @@ for nh in horizons:
     ref_np = np.array(ref_arr)
     rmse = float(np.sqrt(np.mean((zmp_np - ref_np)**2)))
     print("N={:2d}  horizon={:.2f}s  ZMP RMSE={:.5f} m".format(
-        nh, nh*T, rmse))
-`}
+        nh, nh*T, rmse))`}
 />
 
 With a short horizon ($N=5$, only 0.10 s lookahead), the controller cannot
