@@ -212,6 +212,49 @@ for step in range(10):
     print(f"  {step:2d}     {omega_before_strike:8.4f}      {omega_after_strike:8.4f}     {converged}")
 
     omega = omega_after_strike
+
+# Plot convergence of angular velocity
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+omega_plot = omega_steady * 0.8
+steps = list(range(15))
+omega_before_list = []
+omega_after_list = []
+
+for s in steps:
+    energy_gain_plot = 2 * (g / l) * math.sin(gamma) * math.sin(2 * alpha)
+    omega_before_plot = math.sqrt(omega_plot**2 + energy_gain_plot)
+    omega_after_plot = collision_ratio * omega_before_plot
+    omega_before_list.append(omega_before_plot)
+    omega_after_list.append(omega_after_plot)
+    omega_plot = omega_after_plot
+
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(steps, omega_before_list, 'bo-', label='Before heel strike')
+ax.plot(steps, omega_after_list, 'rs-', label='After heel strike')
+ax.axhline(y=omega_steady, color='green', linestyle='--',
+           label=f'Steady state = {omega_steady:.4f}')
+ax.axhline(y=omega_steady * collision_ratio, color='orange',
+           linestyle='--',
+           label=f'Steady after strike = '
+                 f'{omega_steady * collision_ratio:.4f}')
+ax.set_xlabel('Step number')
+ax.set_ylabel('Angular velocity (rad/s)')
+ax.set_title('Rimless Wheel: Convergence of Angular Velocity')
+ax.legend(fontsize=8)
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
 `}
 />
 
@@ -295,6 +338,143 @@ for gamma_val, r, label in slopes:
     print(f"  Distinct states: {len(unique)}")
     print(f"  Values: {[f'{v:.4f}' for v in unique[:4]]}")
     print()
+
+# Plot bifurcation diagram
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+n_r = 2000
+n_discard = 500
+n_plot = 200
+r_min, r_max = 2.5, 4.0
+r_values = np.linspace(r_min, r_max, n_r)
+r_plot = []
+x_plot = []
+
+for r_val in r_values:
+    x = 0.5
+    for _ in range(n_discard):
+        x = r_val * x * (1.0 - x)
+    for _ in range(n_plot):
+        x = r_val * x * (1.0 - x)
+        r_plot.append(r_val)
+        x_plot.append(x)
+
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.scatter(r_plot, x_plot, s=0.02, c='black', alpha=0.5)
+ax.set_xlabel('Parameter r (analogous to slope angle)')
+ax.set_ylabel('Steady-state values')
+ax.set_title('Bifurcation Diagram (Logistic Map)')
+ax.set_xlim(r_min, r_max)
+ax.set_ylim(0, 1)
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
+`}
+/>
+
+## シミュレーション: コンパスゲイト位相ポートレート
+
+以下のシミュレーションでは、簡略化したコンパスゲイト歩行器の遊脚ダイナミクスを
+4次ルンゲ・クッタ法（RK4）で数値積分します。異なる初期条件からの複数の軌道を
+位相面（$\theta_{sw}$, $\dot{\theta}_{sw}$）上に重ねて描画し、軌道がリミットサイクルに
+収束する様子や発散する様子を示します。
+
+<CodeEditor
+  initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+# Simplified swing leg dynamics for compass gait walker
+# theta_sw'' = -sin(theta_sw) + gamma * cos(theta_sw)
+# State: [theta_sw, theta_sw_dot]
+
+gamma = 0.05  # slope angle (rad)
+
+def swing_deriv(state):
+    theta, theta_dot = state
+    theta_ddot = -math.sin(theta) + gamma * math.cos(theta)
+    return [theta_dot, theta_ddot]
+
+def rk4_step(state, dt):
+    k1 = swing_deriv(state)
+    s2 = [state[0] + 0.5*dt*k1[0], state[1] + 0.5*dt*k1[1]]
+    k2 = swing_deriv(s2)
+    s3 = [state[0] + 0.5*dt*k2[0], state[1] + 0.5*dt*k2[1]]
+    k3 = swing_deriv(s3)
+    s4 = [state[0] + dt*k3[0], state[1] + dt*k3[1]]
+    k4 = swing_deriv(s4)
+    new_theta = state[0] + (dt/6)*(k1[0]+2*k2[0]+2*k3[0]+k4[0])
+    new_tdot = state[1] + (dt/6)*(k1[1]+2*k2[1]+2*k3[1]+k4[1])
+    return [new_theta, new_tdot]
+
+def simulate_trajectory(theta0, tdot0, dt, n_steps):
+    thetas = [theta0]
+    tdots = [tdot0]
+    state = [theta0, tdot0]
+    for _ in range(n_steps):
+        state = rk4_step(state, dt)
+        thetas.append(state[0])
+        tdots.append(state[1])
+    return thetas, tdots
+
+# Initial conditions: varying angle and velocity
+initial_conditions = [
+    (0.1, 0.0, 'blue'),
+    (0.2, 0.0, 'red'),
+    (0.3, 0.0, 'green'),
+    (-0.1, 0.5, 'purple'),
+    (-0.2, -0.3, 'orange'),
+    (0.15, -0.5, 'cyan'),
+    (0.05, 0.8, 'brown'),
+    (-0.15, 0.6, 'magenta'),
+]
+
+dt = 0.005
+n_steps = 3000
+
+fig, ax = plt.subplots(figsize=(8, 6))
+
+for theta0, tdot0, color in initial_conditions:
+    thetas, tdots = simulate_trajectory(theta0, tdot0, dt, n_steps)
+    ax.plot(thetas, tdots, color=color, alpha=0.6, linewidth=0.8)
+    ax.plot(thetas[0], tdots[0], 'o', color=color, markersize=5)
+
+ax.set_xlabel('Swing leg angle (rad)')
+ax.set_ylabel('Swing leg angular velocity (rad/s)')
+ax.set_title('Compass Gait: Phase Portrait of Swing Leg Dynamics'
+             f' (slope = {math.degrees(gamma):.1f} deg)')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-0.8, 0.8)
+ax.set_ylim(-1.5, 1.5)
+plt.tight_layout()
+
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
+
+print()
+print("Phase portrait shows swing leg trajectories from")
+print("different initial conditions.")
+print("Dots mark starting points. Closed orbits indicate")
+print("periodic oscillations (potential limit cycles).")
+print(f"Slope angle: {math.degrees(gamma):.1f} degrees")
+print(f"Integration: RK4 with dt={dt}, {n_steps} steps")
 `}
 />
 
