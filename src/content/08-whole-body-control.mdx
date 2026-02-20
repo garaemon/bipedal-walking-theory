@@ -151,11 +151,21 @@ def compute_jacobian(q1, q2):
     J22 = l2 * math.cos(q1 + q2)
     return J11, J12, J21, J22
 
+def compute_link_positions(q1, q2):
+    """Return base, elbow, and end-effector positions."""
+    elbow_x = l1 * math.cos(q1)
+    elbow_y = l1 * math.sin(q1)
+    ee_x = elbow_x + l2 * math.cos(q1 + q2)
+    ee_y = elbow_y + l2 * math.sin(q1 + q2)
+    return (0, 0), (elbow_x, elbow_y), (ee_x, ee_y)
+
 # Start configuration
 q1, q2 = math.pi/4, -math.pi/6
 x, y = forward_kinematics(q1, q2)
 print("=== 2-Link Robot Inverse Kinematics ===")
-print(f"Initial config: q1={math.degrees(q1):.1f} deg, q2={math.degrees(q2):.1f} deg")
+init_q1_deg = math.degrees(q1)
+init_q2_deg = math.degrees(q2)
+print(f"Initial config: q1={init_q1_deg:.1f} deg, q2={init_q2_deg:.1f} deg")
 print(f"End-effector: ({x:.4f}, {y:.4f}) m")
 print()
 
@@ -167,17 +177,24 @@ print()
 # IK using Jacobian pseudoinverse (iterative)
 dt = 0.05
 gain = 2.0
-print("Iter  q1(deg)  q2(deg)  x(m)     y(m)     error(mm)")
+print("Iter  q1(deg)  q2(deg)  x(m)     y(m)     err(mm)")
 print("-" * 55)
+
+# Store intermediate poses for visualization
+pose_history = []
 
 for i in range(20):
     x, y = forward_kinematics(q1, q2)
     ex, ey = x_target - x, y_target - y
     error = math.sqrt(ex**2 + ey**2)
+    pose_history.append((q1, q2))
 
     if i % 2 == 0:
-        print(f" {i:2d}   {math.degrees(q1):7.2f}  {math.degrees(q2):7.2f}  "
-              f"{x:7.4f}  {y:7.4f}  {error*1000:7.3f}")
+        q1_deg = math.degrees(q1)
+        q2_deg = math.degrees(q2)
+        err_mm = error * 1000
+        print(f" {i:2d}   {q1_deg:7.2f}  {q2_deg:7.2f}  "
+              f"{x:7.4f}  {y:7.4f}  {err_mm:7.3f}")
 
     if error < 0.001:
         print(f"\\nConverged in {i} iterations!")
@@ -197,6 +214,201 @@ for i in range(20):
 
     q1 += dq1
     q2 += dq2
+
+# Visualization of the IK convergence
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+
+# Draw intermediate poses with fading opacity
+num_poses = len(pose_history)
+for idx, (pq1, pq2) in enumerate(pose_history):
+    fade = 0.1 + 0.3 * (idx / max(num_poses - 1, 1))
+    base, elbow, ee = compute_link_positions(pq1, pq2)
+    xs = [base[0], elbow[0], ee[0]]
+    ys = [base[1], elbow[1], ee[1]]
+    ax.plot(xs, ys, 'o-', color='steelblue', alpha=fade,
+            linewidth=1.5, markersize=4)
+
+# Draw final pose with bold lines
+final_q1, final_q2 = pose_history[-1]
+base, elbow, ee = compute_link_positions(final_q1, final_q2)
+xs = [base[0], elbow[0], ee[0]]
+ys = [base[1], elbow[1], ee[1]]
+ax.plot(xs, ys, 'o-', color='darkblue', linewidth=3.5,
+        markersize=8, label='Final pose', zorder=5)
+
+# Draw initial pose
+init_q1, init_q2 = pose_history[0]
+b0, e0, ee0 = compute_link_positions(init_q1, init_q2)
+xs0 = [b0[0], e0[0], ee0[0]]
+ys0 = [b0[1], e0[1], ee0[1]]
+ax.plot(xs0, ys0, 'o--', color='gray', linewidth=2,
+        markersize=6, label='Initial pose', zorder=4)
+
+# Draw target
+ax.plot(x_target, y_target, 'r*', markersize=18,
+        label='Target', zorder=6)
+
+# Mark base joint
+ax.plot(0, 0, 'ks', markersize=10, zorder=7)
+
+ax.set_xlabel('x (m)')
+ax.set_ylabel('y (m)')
+ax.set_title('2-Link Robot Arm: IK Convergence')
+ax.set_aspect('equal')
+ax.legend(loc='upper left')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-0.2, 0.9)
+ax.set_ylim(-0.2, 0.8)
+
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
+`}
+/>
+
+## Simulation: Manipulability Ellipsoid
+
+The **manipulability ellipsoid** visualizes the ease of end-effector motion
+in different directions for a given arm configuration. It is derived from
+the Jacobian: the singular value decomposition $\mathbf{J} = \mathbf{U}
+\boldsymbol{\Sigma} \mathbf{V}^T$ gives the principal axes (columns of
+$\mathbf{U}$) and their magnitudes (singular values $\sigma_i$). The
+ellipsoid semi-axes are $\sigma_i \mathbf{u}_i$. Yoshikawa's
+**manipulability measure** $w = \sigma_1 \sigma_2 \cdots \sigma_m =
+\sqrt{\det(\mathbf{J}\mathbf{J}^T)}$ quantifies overall dexterity: $w = 0$
+at a singularity and is maximized at the most dexterous configuration.
+
+<CodeEditor
+  initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+l1 = 0.4  # link 1 length
+l2 = 0.35  # link 2 length
+
+def compute_link_positions(q1, q2):
+    """Return base, elbow, and end-effector positions."""
+    elbow_x = l1 * math.cos(q1)
+    elbow_y = l1 * math.sin(q1)
+    ee_x = elbow_x + l2 * math.cos(q1 + q2)
+    ee_y = elbow_y + l2 * math.sin(q1 + q2)
+    return (0, 0), (elbow_x, elbow_y), (ee_x, ee_y)
+
+def compute_jacobian_matrix(q1, q2):
+    """Compute the 2x2 Jacobian as a numpy array."""
+    s1 = math.sin(q1)
+    s12 = math.sin(q1 + q2)
+    c1 = math.cos(q1)
+    c12 = math.cos(q1 + q2)
+    J = np.array([
+        [-l1*s1 - l2*s12, -l2*s12],
+        [ l1*c1 + l2*c12,  l2*c12]
+    ])
+    return J
+
+def compute_ellipse_points(center, U, sigmas, n_pts=100):
+    """Compute points on the manipulability ellipse."""
+    theta = np.linspace(0, 2*np.pi, n_pts)
+    circle = np.array([np.cos(theta), np.sin(theta)])
+    scale = np.diag(sigmas)
+    ellipse = U @ scale @ circle
+    ellipse[0] += center[0]
+    ellipse[1] += center[1]
+    return ellipse
+
+# Define 4 different arm configurations
+configs = [
+    (math.pi/6, -math.pi/3, "q1=30, q2=-60"),
+    (math.pi/3, -math.pi/6, "q1=60, q2=-30"),
+    (math.pi/4, math.pi/4, "q1=45, q2=45"),
+    (math.pi/2, -math.pi/2, "q1=90, q2=-90"),
+]
+
+fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+ellipse_scale = 0.15
+
+print("=== Manipulability Ellipsoid Analysis ===")
+print()
+
+for idx, (q1, q2, label) in enumerate(configs):
+    row = idx // 2
+    col = idx % 2
+    ax = axes[row][col]
+    base, elbow, ee = compute_link_positions(q1, q2)
+
+    # Draw the arm
+    arm_x = [base[0], elbow[0], ee[0]]
+    arm_y = [base[1], elbow[1], ee[1]]
+    ax.plot(arm_x, arm_y, 'o-', color='darkblue',
+            linewidth=3, markersize=8, zorder=5)
+    ax.plot(0, 0, 'ks', markersize=10, zorder=6)
+
+    # Compute Jacobian and SVD
+    J = compute_jacobian_matrix(q1, q2)
+    U_mat, sigma_vec, Vt = np.linalg.svd(J)
+    w = sigma_vec[0] * sigma_vec[1]
+
+    # Draw manipulability ellipse at end-effector
+    scaled_sigmas = sigma_vec * ellipse_scale
+    ellipse_pts = compute_ellipse_points(
+        np.array([ee[0], ee[1]]),
+        U_mat, scaled_sigmas
+    )
+    ax.fill(ellipse_pts[0], ellipse_pts[1],
+            alpha=0.3, color='coral')
+    ax.plot(ellipse_pts[0], ellipse_pts[1],
+            color='red', linewidth=2)
+
+    # Draw principal axes as arrows
+    for k in range(2):
+        d = U_mat[:, k] * sigma_vec[k] * ellipse_scale
+        ax.annotate(
+            '', xy=(ee[0]+d[0], ee[1]+d[1]),
+            xytext=(ee[0], ee[1]),
+            arrowprops=dict(
+                arrowstyle='->', color='green', lw=2
+            ))
+
+    title_str = label + "\\nw=" + f"{w:.4f}"
+    ax.set_title(title_str, fontsize=11)
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(-0.3, 0.9)
+    ax.set_ylim(-0.4, 0.9)
+    ax.set_xlabel('x (m)')
+    ax.set_ylabel('y (m)')
+
+    s1_val = sigma_vec[0]
+    s2_val = sigma_vec[1]
+    cond = s1_val / max(s2_val, 1e-10)
+    print(f"Config: {label}")
+    print(f"  Singular values: s1={s1_val:.4f}, s2={s2_val:.4f}")
+    print(f"  Manipulability w = {w:.4f}")
+    print(f"  Condition number = {cond:.2f}")
+    print()
+
+fig.suptitle('Manipulability Ellipsoids for 2-Link Arm',
+             fontsize=14, fontweight='bold')
+plt.tight_layout()
+
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
 `}
 />
 
