@@ -89,6 +89,11 @@ ZMPが支持多角形の端に達すると、ロボットは転倒し始めま�
 
 <CodeEditor
   initialCode={`import math
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
 
 # Simulate a simple CoM trajectory and compute ZMP
 # Using a sinusoidal CoM motion
@@ -106,9 +111,10 @@ omega_walk = 2 * math.pi / 0.6  # walking frequency
 print("Time(s)  CoM_x(m)  CoM_xdd(m/s^2)  ZMP_x(m)")
 print("-" * 50)
 
+com_x_list = []
+zmp_x_list = []
+
 for i, t in enumerate(t_values):
-    if i % 10 != 0:
-        continue
     # CoM position and acceleration
     x = A * math.sin(omega_walk * t)
     xdd = -A * omega_walk**2 * math.sin(omega_walk * t)
@@ -116,7 +122,38 @@ for i, t in enumerate(t_values):
     # ZMP computation (constant height, no vertical acceleration)
     zmp_x = x - (z_c / g) * xdd
 
-    print(f"{t:5.2f}    {x:8.5f}    {xdd:8.4f}       {zmp_x:8.5f}")
+    com_x_list.append(x)
+    zmp_x_list.append(zmp_x)
+
+    if i % 10 == 0:
+        print(f"{t:5.2f}    {x:8.5f}    {xdd:8.4f}       {zmp_x:8.5f}")
+
+# Plot CoM and ZMP trajectories
+t_arr = np.array(t_values)
+fig, axes = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
+
+axes[0].plot(t_arr, np.array(com_x_list) * 100, "b-", linewidth=2)
+axes[0].set_ylabel("CoM x [cm]")
+axes[0].set_title("CoM Trajectory")
+axes[0].grid(True, alpha=0.3)
+
+axes[1].plot(t_arr, np.array(com_x_list) * 100, "b-",
+             linewidth=1.5, label="CoM x")
+axes[1].plot(t_arr, np.array(zmp_x_list) * 100, "r--",
+             linewidth=2, label="ZMP x")
+axes[1].set_xlabel("Time [s]")
+axes[1].set_ylabel("Position [cm]")
+axes[1].set_title("ZMP vs CoM (note ZMP phase lead)")
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
 `}
 />
 
@@ -143,12 +180,18 @@ ZMPに基づく歩行の典型的なパイプライン:
 
 <CodeEditor
   initialCode={`import math
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
 
 # ZMP reference trajectory for 3-step walk
 # Simplified: ZMP shifts between left and right foot positions
 
 foot_y_left = 0.05    # left foot y-position (m)
 foot_y_right = -0.05  # right foot y-position (m)
+foot_width = 0.06     # foot width in y-direction (m)
 step_duration = 0.6   # seconds per step
 dt = 0.01
 
@@ -165,6 +208,8 @@ print("-" * 40)
 
 total_time = 3 * step_duration
 t = 0.0
+t_list = []
+zmp_ref_list = []
 while t <= total_time:
     # Determine current support phase
     phase = int(t / step_duration)
@@ -174,6 +219,9 @@ while t <= total_time:
     zmp_ref_y = footsteps[phase][1]
     support = "Left" if zmp_ref_y > 0 else "Right"
 
+    t_list.append(t)
+    zmp_ref_list.append(zmp_ref_y)
+
     if int(t * 100) % 10 == 0:
         print(f"{t:5.2f}    {zmp_ref_y:8.4f}      {support}")
     t += dt
@@ -182,6 +230,155 @@ print()
 print("The ZMP reference alternates between feet.")
 print("Preview control (Ch.5) computes the CoM trajectory")
 print("that tracks this ZMP reference.")
+
+# Plot footstep rectangles and ZMP reference trajectory
+fig, ax = plt.subplots(figsize=(8, 4))
+
+colors = ["#4a90d9", "#d94a4a", "#4a90d9"]
+labels_used = set()
+for i, (t_start, foot_y) in enumerate(footsteps):
+    t_end = t_start + step_duration
+    y_lo = foot_y - foot_width / 2
+    y_hi = foot_y + foot_width / 2
+    side = "Left foot" if foot_y > 0 else "Right foot"
+    lbl = side if side not in labels_used else None
+    labels_used.add(side)
+    ax.fill_between(
+        [t_start, t_end], y_lo * 100, y_hi * 100,
+        alpha=0.2, color=colors[i], label=lbl
+    )
+    ax.plot(
+        [t_start, t_end, t_end, t_start, t_start],
+        [y_lo * 100, y_lo * 100, y_hi * 100, y_hi * 100, y_lo * 100],
+        color=colors[i], linewidth=1
+    )
+
+# Step transition lines
+for i in range(1, len(footsteps)):
+    t_switch = footsteps[i][0]
+    ax.axvline(t_switch, color="gray", linestyle="--",
+               linewidth=1, alpha=0.7,
+               label="Step transition" if i == 1 else None)
+
+ax.plot(t_list, np.array(zmp_ref_list) * 100, "k-",
+        linewidth=2, label="ZMP ref")
+ax.set_xlabel("Time [s]")
+ax.set_ylabel("Lateral position [cm]")
+ax.set_title("ZMP Reference Trajectory with Support Polygons")
+ax.legend(loc="upper right", fontsize=8)
+ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
+`}
+/>
+
+## シミュレーション: ZMP安定性の可視化
+
+以下のシミュレーションでは、穏やかなCoM運動（安定）と、急激な加速によりZMPが支持多角形の外に出るケース（不安定）を比較して、ZMP安定性基準を実演します。
+
+<CodeEditor
+  initialCode={`import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+g = 9.81
+z_c = 0.8  # constant CoM height (m)
+
+# Support polygon boundaries (single foot, x-direction)
+foot_length = 0.20  # 20 cm foot
+support_min = -foot_length / 2
+support_max = foot_length / 2
+
+dt = 0.005
+t_arr = np.arange(0, 1.0, dt)
+
+def compute_zmp_trajectory(amplitude, omega):
+    """Compute CoM and ZMP for sinusoidal CoM motion."""
+    com_x = amplitude * np.sin(omega * t_arr)
+    com_xdd = -amplitude * omega**2 * np.sin(omega * t_arr)
+    zmp_x = com_x - (z_c / g) * com_xdd
+    return com_x, zmp_x
+
+# Case 1: Stable (small amplitude, low frequency)
+com_stable, zmp_stable = compute_zmp_trajectory(0.03, 2.0 * np.pi)
+
+# Case 2: Unstable (large amplitude, high frequency)
+com_unstable, zmp_unstable = compute_zmp_trajectory(0.08, 4.0 * np.pi)
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+for ax, com_x, zmp_x, title in [
+    (axes[0], com_stable, zmp_stable, "Stable: ZMP inside polygon"),
+    (axes[1], com_unstable, zmp_unstable, "Unstable: ZMP exits polygon"),
+]:
+    # Support polygon background
+    ax.fill_between(
+        t_arr, support_min * 100, support_max * 100,
+        alpha=0.15, color="green", label="Support polygon"
+    )
+    ax.axhline(support_min * 100, color="green",
+               linestyle="-", linewidth=1.5, alpha=0.6)
+    ax.axhline(support_max * 100, color="green",
+               linestyle="-", linewidth=1.5, alpha=0.6)
+
+    # Color ZMP by stability
+    zmp_cm = zmp_x * 100
+    in_support = (zmp_x >= support_min) & (zmp_x <= support_max)
+    out_support = ~in_support
+
+    # Plot ZMP segments with different colors
+    ax.plot(t_arr, zmp_cm, color="gray", linewidth=0.5, alpha=0.3)
+    if np.any(in_support):
+        t_in = t_arr.copy()
+        z_in = zmp_cm.copy()
+        z_in[out_support] = np.nan
+        ax.plot(t_in, z_in, "b-", linewidth=2, label="ZMP (stable)")
+    if np.any(out_support):
+        t_out = t_arr.copy()
+        z_out = zmp_cm.copy()
+        z_out[in_support] = np.nan
+        ax.plot(t_out, z_out, "r-", linewidth=2.5, label="ZMP (unstable)")
+
+    ax.plot(t_arr, com_x * 100, "k--", linewidth=1, alpha=0.6,
+            label="CoM")
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("x position [cm]")
+    ax.set_title(title)
+    ax.legend(fontsize=7, loc="upper right")
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim([-15, 15])
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
+
+# Print summary
+n_total = len(t_arr)
+stable_in = np.sum(
+    (zmp_stable >= support_min) & (zmp_stable <= support_max)
+)
+unstable_in = np.sum(
+    (zmp_unstable >= support_min) & (zmp_unstable <= support_max)
+)
+print(f"Stable case:   {stable_in}/{n_total} samples inside polygon "
+      f"({100*stable_in/n_total:.1f}%)")
+print(f"Unstable case: {unstable_in}/{n_total} samples inside polygon "
+      f"({100*unstable_in/n_total:.1f}%)")
+print()
+print("When CoM acceleration is too large, the ZMP (red) exits")
+print("the support polygon, indicating the robot would tip over.")
 `}
 />
 
