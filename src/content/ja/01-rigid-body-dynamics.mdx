@@ -99,8 +99,8 @@ m_shank = 2.0
 r_shank = 0.03
 h_shank = 0.35
 
-# Moments of inertia about CoM (cylinder approximation)
 def compute_cylinder_inertia(m, r, h):
+    """Compute moments of inertia for a solid cylinder about its CoM."""
     Ixx = (1/12) * m * (3 * r**2 + h**2)
     Iyy = Ixx
     Izz = 0.5 * m * r**2
@@ -119,7 +119,7 @@ print(f"  Ixx = Iyy = {Ixx_s:.6f} kg*m^2")
 print(f"  Izz = {Izz_s:.6f} kg*m^2")
 
 # Parallel axis theorem: shank inertia about hip
-d_shank = h_thigh + h_shank / 2  # distance from hip to shank CoM
+d_shank = h_thigh + h_shank / 2
 Ixx_shank_hip = Ixx_s + m_shank * d_shank**2
 
 print(f"\\n=== Parallel Axis Theorem ===")
@@ -127,6 +127,44 @@ print(f"Shank CoM distance from hip: {d_shank:.3f} m")
 print(f"Shank Ixx about hip: {Ixx_shank_hip:.6f} kg*m^2")
 print(f"  (vs about own CoM: {Ixx_s:.6f} kg*m^2)")
 print(f"  Ratio: {Ixx_shank_hip/Ixx_s:.1f}x increase")
+
+# --- Bar chart of moments of inertia ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def plot_inertia_bar_chart(thigh_inertia, shank_inertia):
+    """Plot a grouped bar chart comparing thigh and shank inertia."""
+    labels = ["Ixx (= Iyy)", "Izz"]
+    thigh_vals = [thigh_inertia[0], thigh_inertia[2]]
+    shank_vals = [shank_inertia[0], shank_inertia[2]]
+
+    x = np.arange(len(labels))
+    width = 0.3
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.bar(x - width/2, thigh_vals, width, label="Thigh", color="#2563eb")
+    ax.bar(x + width/2, shank_vals, width, label="Shank", color="#dc2626")
+    ax.set_ylabel("Moment of Inertia (kg*m^2)")
+    ax.set_title("Robot Leg Inertia Comparison")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+fig = plot_inertia_bar_chart(
+    (Ixx_t, Iyy_t, Izz_t),
+    (Ixx_s, Iyy_s, Izz_s),
+)
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
 `}
 />
 
@@ -268,10 +306,204 @@ print(f"\\nTo hold this pose statically:")
 print(f"  tau_hip  = {g1:.4f} N*m")
 print(f"  tau_knee = {g2:.4f} N*m")
 
-# Determinant of mass matrix (important for invertibility)
 det = M11 * M22 - M12 * M21
 print(f"\\nMass matrix determinant: {det:.6f}")
 print(f"Mass matrix is {'positive definite' if det > 0 else 'NOT positive definite'}")
+
+# --- Stick figure of the double pendulum configuration ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def compute_joint_positions(q1, q2, l1, l2):
+    """Compute (x, y) positions of shoulder, elbow, and end-effector."""
+    x1 = l1 * math.sin(q1)
+    y1 = -l1 * math.cos(q1)
+    x2 = x1 + l2 * math.sin(q1 + q2)
+    y2 = y1 - l2 * math.cos(q1 + q2)
+    return (0, 0), (x1, y1), (x2, y2)
+
+def plot_stick_figure(q1, q2, l1, l2):
+    """Draw the double pendulum as a stick figure with joint labels."""
+    p0, p1, p2 = compute_joint_positions(q1, q2, l1, l2)
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    # Draw links
+    ax.plot([p0[0], p1[0]], [p0[1], p1[1]],
+            "o-", color="#2563eb", lw=4, markersize=8, label="Link 1")
+    ax.plot([p1[0], p2[0]], [p1[1], p2[1]],
+            "o-", color="#dc2626", lw=4, markersize=8, label="Link 2")
+    # Mark pivot
+    ax.plot(p0[0], p0[1], "ks", markersize=12, label="Pivot")
+    # Labels
+    ax.annotate("Hip (pivot)", xy=p0, xytext=(0.05, 0.05),
+                fontsize=9, fontweight="bold")
+    ax.annotate("Knee", xy=p1, xytext=(p1[0]+0.03, p1[1]+0.03),
+                fontsize=9, fontweight="bold")
+    ax.annotate("End-effector", xy=p2, xytext=(p2[0]+0.03, p2[1]+0.03),
+                fontsize=9, fontweight="bold")
+
+    limit = l1 + l2 + 0.1
+    ax.set_xlim(-limit, limit)
+    ax.set_ylim(-limit, limit * 0.3)
+    ax.set_aspect("equal")
+    ax.grid(True, alpha=0.3)
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
+    ax.set_title("Double Pendulum Configuration (q1=45, q2=-30 deg)")
+    ax.legend(loc="upper right", fontsize=8)
+    plt.tight_layout()
+    return fig
+
+fig = plot_stick_figure(q1, q2, l1, l2)
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
+`}
+/>
+
+## シミュレーション: 二重振子の順動力学
+
+以下のシミュレーションは、4次のルンゲ・クッタ法（RK4）を用いて二重振子の運動方程式を積分します。
+重力下でトルク入力ゼロの初期状態から、振子が時間とともにどのように変化するかを示します。
+左のパネルは関節角度を、右のパネルはデカルト空間における先端の軌跡を描画します。
+
+<CodeEditor
+  initialCode={`import math
+import numpy as np
+
+# === Physical parameters ===
+m1, m2 = 3.0, 2.0
+l1, l2 = 0.4, 0.35
+lc1, lc2 = l1 / 2, l2 / 2
+I1 = m1 * l1**2 / 12
+I2 = m2 * l2**2 / 12
+gravity = 9.81
+
+def compute_mass_matrix(q1, q2):
+    """Return 2x2 mass matrix entries."""
+    c2 = math.cos(q2)
+    M11 = m1*lc1**2 + I1 + m2*(l1**2 + lc2**2 + 2*l1*lc2*c2) + I2
+    M12 = m2*(lc2**2 + l1*lc2*c2) + I2
+    M22 = m2*lc2**2 + I2
+    return M11, M12, M12, M22
+
+def compute_coriolis_vector(q1, q2, dq1, dq2):
+    """Return Coriolis/centrifugal torque vector."""
+    s2 = math.sin(q2)
+    h = m2 * l1 * lc2 * s2
+    c1 = -h * dq2 * (2*dq1 + dq2)
+    c2 = h * dq1**2
+    return c1, c2
+
+def compute_gravity_torques(q1, q2):
+    """Return gravity torque vector."""
+    g1 = (m1*lc1 + m2*l1)*gravity*math.sin(q1) + m2*lc2*gravity*math.sin(q1+q2)
+    g2 = m2*lc2*gravity*math.sin(q1+q2)
+    return g1, g2
+
+def compute_accelerations(q1, q2, dq1, dq2):
+    """Solve forward dynamics: M * ddq = -C - g (zero torque)."""
+    M11, M12, M21, M22 = compute_mass_matrix(q1, q2)
+    c1, c2 = compute_coriolis_vector(q1, q2, dq1, dq2)
+    g1, g2 = compute_gravity_torques(q1, q2)
+    rhs1 = -c1 - g1
+    rhs2 = -c2 - g2
+    det = M11 * M22 - M12 * M21
+    ddq1 = (M22 * rhs1 - M12 * rhs2) / det
+    ddq2 = (-M21 * rhs1 + M11 * rhs2) / det
+    return ddq1, ddq2
+
+def rk4_step(state, dt):
+    """Advance one RK4 step for [q1, q2, dq1, dq2]."""
+    def derivs(s):
+        ddq1, ddq2 = compute_accelerations(s[0], s[1], s[2], s[3])
+        return np.array([s[2], s[3], ddq1, ddq2])
+    k1 = derivs(state)
+    k2 = derivs(state + 0.5 * dt * k1)
+    k3 = derivs(state + 0.5 * dt * k2)
+    k4 = derivs(state + dt * k3)
+    return state + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+
+def run_simulation(q1_init, q2_init, t_end, dt):
+    """Integrate the double pendulum ODE and return time history."""
+    n_steps = int(t_end / dt)
+    state = np.array([q1_init, q2_init, 0.0, 0.0])
+    time_hist = np.zeros(n_steps + 1)
+    q_hist = np.zeros((n_steps + 1, 2))
+    q_hist[0] = [state[0], state[1]]
+    for i in range(n_steps):
+        state = rk4_step(state, dt)
+        time_hist[i + 1] = (i + 1) * dt
+        q_hist[i + 1] = [state[0], state[1]]
+    return time_hist, q_hist
+
+def compute_end_effector(q1_arr, q2_arr, l1, l2):
+    """Compute end-effector (x, y) from joint angle arrays."""
+    x1 = l1 * np.sin(q1_arr)
+    y1 = -l1 * np.cos(q1_arr)
+    x2 = x1 + l2 * np.sin(q1_arr + q2_arr)
+    y2 = y1 - l2 * np.cos(q1_arr + q2_arr)
+    return x2, y2
+
+# --- Run simulation ---
+t_end = 3.0
+dt = 0.002
+q1_init = math.pi / 4
+q2_init = -math.pi / 6
+time_hist, q_hist = run_simulation(q1_init, q2_init, t_end, dt)
+ee_x, ee_y = compute_end_effector(q_hist[:, 0], q_hist[:, 1], l1, l2)
+
+print("=== Double Pendulum Forward Dynamics (RK4) ===")
+print(f"Initial angles: q1={math.degrees(q1_init):.0f} deg, q2={math.degrees(q2_init):.0f} deg")
+print(f"Simulation time: {t_end} s, dt={dt} s")
+print(f"Final angles: q1={math.degrees(q_hist[-1,0]):.1f} deg, q2={math.degrees(q_hist[-1,1]):.1f} deg")
+
+# --- Plot results ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import io, base64
+
+def plot_forward_dynamics(time_hist, q_hist, ee_x, ee_y):
+    """Create a 2-panel figure: joint angles and end-effector trajectory."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+
+    # Panel 1: Joint angles vs time
+    ax1.plot(time_hist, np.degrees(q_hist[:, 0]), label="q1 (hip)", color="#2563eb")
+    ax1.plot(time_hist, np.degrees(q_hist[:, 1]), label="q2 (knee)", color="#dc2626")
+    ax1.set_xlabel("Time (s)")
+    ax1.set_ylabel("Joint Angle (deg)")
+    ax1.set_title("Joint Angles vs Time")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+
+    # Panel 2: End-effector trajectory
+    ax2.plot(ee_x, ee_y, color="#059669", lw=0.5, alpha=0.7)
+    ax2.plot(ee_x[0], ee_y[0], "go", markersize=8, label="Start")
+    ax2.plot(ee_x[-1], ee_y[-1], "rs", markersize=8, label="End")
+    ax2.set_xlabel("x (m)")
+    ax2.set_ylabel("y (m)")
+    ax2.set_title("End-Effector Trajectory")
+    ax2.set_aspect("equal")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    return fig
+
+fig = plot_forward_dynamics(time_hist, q_hist, ee_x, ee_y)
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
 `}
 />
 
