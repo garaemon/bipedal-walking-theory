@@ -158,6 +158,11 @@ clarifies when to use each method.
 
 <CodeEditor
   initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
 
 # Simple Linear MPC for LIPM walking
 # Using unconstrained gradient descent (for demonstration only).
@@ -178,8 +183,8 @@ A = [[1, T, T**2/2], [0, 1, T], [0, 0, 1]]
 B = [T**3/6, T**2/2, T]
 C = [1, 0, -z_c/g]
 
-def mat_vec_mul(M, v):
-    return [sum(M[i][j]*v[j] for j in range(len(v))) for i in range(len(M))]
+step_duration = 0.6
+step_length = 0.15
 
 def predict_trajectory(x0, U):
     """Predict state and ZMP trajectory given control sequence."""
@@ -189,74 +194,271 @@ def predict_trajectory(x0, U):
     for u in U:
         zmp = sum(C[j]*x[j] for j in range(3))
         zmps.append(zmp)
-        x_new = [sum(A[i][j]*x[j] for j in range(3)) + B[i]*u for i in range(3)]
+        x_new = [
+            sum(A[i][j]*x[j] for j in range(3)) + B[i]*u
+            for i in range(3)
+        ]
         states.append(x_new[:])
         x = x_new
     zmps.append(sum(C[j]*x[j] for j in range(3)))
     return states, zmps
 
-# ZMP reference (step pattern in x-direction)
-step_duration = 0.6
-step_length = 0.15
-
-def get_zmp_ref(t_start, N_steps):
+def get_zmp_ref(t_start, n_steps):
+    """Generate ZMP reference based on step pattern."""
     refs = []
-    for i in range(N_steps):
+    for i in range(n_steps):
         t = t_start + i * T
         phase = int(t / step_duration)
         refs.append(phase * step_length)
     return refs
 
-# Initial state
-x = [0.0, 0.3, 0.0]  # start with forward velocity
+def compute_support_bounds(t):
+    """Return support polygon bounds at time t."""
+    phase = int(t / step_duration)
+    center = phase * step_length
+    half_foot = 0.07
+    return center - half_foot, center + half_foot
 
-# MPC weights
-Q_zmp = 1.0    # ZMP tracking weight
-R_u = 1e-6     # control effort weight
+# Initial state
+x = [0.0, 0.3, 0.0]
+Q_zmp = 1.0
+R_u = 1e-6
 
 print("=== Linear MPC Walking ===")
-print(f"Horizon: {N} steps ({N*T:.2f}s)")
-print(f"Step length: {step_length}m, Step duration: {step_duration}s")
+print("Horizon: {} steps ({:.2f}s)".format(N, N * T))
+print("Step length: {}m, Step duration: {}s".format(
+    step_length, step_duration))
 print()
 
-# Simulate for 2 seconds
 sim_steps = int(2.0 / T)
 print("Time(s)  CoM_x(m)  ZMP(m)   ZMP_ref(m)  Jerk")
 print("-" * 55)
+
+# Storage for plotting
+time_log = []
+com_log = []
+zmp_log = []
+ref_log = []
+jerk_log = []
+sp_lo_log = []
+sp_hi_log = []
 
 for k in range(sim_steps):
     t = k * T
     zmp_ref = get_zmp_ref(t, N + 1)
 
-    # Simple MPC: solve with gradient descent (simplified)
     U = [0.0] * N
-    learning_rate = 0.1
-
-    for opt_iter in range(30):
-        states, zmps = predict_trajectory(x, U)
-        # Gradient of cost w.r.t. U
+    lr = 0.1
+    for _ in range(30):
+        _, zmps = predict_trajectory(x, U)
         grad = [0.0] * N
         for i in range(N):
-            zmp_error = zmps[i] - zmp_ref[i]
-            grad[i] = 2 * Q_zmp * zmp_error + 2 * R_u * U[i]
-        # Update
+            err = zmps[i] - zmp_ref[i]
+            grad[i] = 2 * Q_zmp * err + 2 * R_u * U[i]
         for i in range(N):
-            U[i] -= learning_rate * grad[i]
-            U[i] = max(-50, min(50, U[i]))  # clamp jerk
+            U[i] -= lr * grad[i]
+            U[i] = max(-50, min(50, U[i]))
 
-    # Apply first control input
     u_applied = U[0]
-    zmp = sum(C[j]*x[j] for j in range(3))
-    phase = int(t / step_duration)
-    zmp_ref_now = phase * step_length
+    zmp = sum(C[j] * x[j] for j in range(3))
+    zmp_ref_now = int(t / step_duration) * step_length
+    lo, hi = compute_support_bounds(t)
+
+    time_log.append(t)
+    com_log.append(x[0])
+    zmp_log.append(zmp)
+    ref_log.append(zmp_ref_now)
+    jerk_log.append(u_applied)
+    sp_lo_log.append(lo)
+    sp_hi_log.append(hi)
 
     if k % 5 == 0:
-        print(f"{t:5.2f}    {x[0]:7.4f}  {zmp:7.4f}   {zmp_ref_now:7.4f}    {u_applied:7.2f}")
+        print("{:5.2f}    {:7.4f}  {:7.4f}   {:7.4f}    {:7.2f}".format(
+            t, x[0], zmp, zmp_ref_now, u_applied))
 
-    # State update
-    x = [sum(A[i][j]*x[j] for j in range(3)) + B[i]*u_applied for i in range(3)]
-`}
+    x = [
+        sum(A[i][j]*x[j] for j in range(3)) + B[i]*u_applied
+        for i in range(3)
+    ]
+
+# --- Plot results ---
+t_arr = np.array(time_log)
+fig, axes = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+
+ax0 = axes[0]
+ax0.fill_between(t_arr, sp_lo_log, sp_hi_log,
+                 alpha=0.15, color='gray', label='Support polygon')
+ax0.plot(t_arr, com_log, 'b-', linewidth=1.2, label='CoM_x')
+ax0.plot(t_arr, zmp_log, 'g-', linewidth=0.8, label='ZMP')
+ax0.plot(t_arr, ref_log, 'r--', linewidth=1.0, label='ZMP_ref')
+ax0.set_ylabel('Position (m)')
+ax0.set_title('Linear MPC Walking: CoM and ZMP Trajectories')
+ax0.legend(loc='upper left', fontsize=8)
+ax0.grid(True, alpha=0.3)
+
+ax1 = axes[1]
+ax1.plot(t_arr, jerk_log, 'm-', linewidth=0.8)
+ax1.set_xlabel('Time (s)')
+ax1.set_ylabel('Jerk input u (m/s3)')
+ax1.set_title('Control Input (Jerk)')
+ax1.grid(True, alpha=0.3)
+ax1.axhline(y=0, color='k', linewidth=0.5)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print('data:image/png;base64,' + img)
+plt.close()`}
 />
+
+## Simulation: Effect of Prediction Horizon
+
+The prediction horizon $N$ is one of the most important MPC parameters.
+A longer horizon lets the controller anticipate future reference changes
+(e.g., upcoming footsteps) but increases computation. Below we compare
+$N=5$, $N=15$, and $N=30$ on the same walking scenario.
+
+<CodeEditor
+  initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+g = 9.81
+z_c = 0.8
+T = 0.02
+step_duration = 0.6
+step_length = 0.15
+
+A = [[1, T, T**2/2], [0, 1, T], [0, 0, 1]]
+B = [T**3/6, T**2/2, T]
+C = [1, 0, -z_c/g]
+
+def predict_trajectory(x0, U):
+    """Predict ZMP trajectory for a given control sequence."""
+    zmps = []
+    x = x0[:]
+    for u in U:
+        zmp = sum(C[j]*x[j] for j in range(3))
+        zmps.append(zmp)
+        x = [
+            sum(A[i][j]*x[j] for j in range(3)) + B[i]*u
+            for i in range(3)
+        ]
+    zmps.append(sum(C[j]*x[j] for j in range(3)))
+    return zmps
+
+def get_zmp_ref(t_start, n_steps):
+    """Generate ZMP reference for the prediction window."""
+    refs = []
+    for i in range(n_steps):
+        t = t_start + i * T
+        refs.append(int(t / step_duration) * step_length)
+    return refs
+
+def run_mpc_sim(horizon_n):
+    """Run a full MPC simulation with a given prediction horizon."""
+    x = [0.0, 0.3, 0.0]
+    sim_steps = int(2.0 / T)
+    Q_zmp = 1.0
+    R_u = 1e-6
+    lr = 0.1
+
+    t_log, com_log, zmp_log, ref_log = [], [], [], []
+
+    for k in range(sim_steps):
+        t = k * T
+        zmp_ref = get_zmp_ref(t, horizon_n + 1)
+
+        U = [0.0] * horizon_n
+        for _ in range(30):
+            zmps = predict_trajectory(x, U)
+            grad = [0.0] * horizon_n
+            for i in range(horizon_n):
+                err = zmps[i] - zmp_ref[i]
+                grad[i] = 2*Q_zmp*err + 2*R_u*U[i]
+            for i in range(horizon_n):
+                U[i] -= lr * grad[i]
+                U[i] = max(-50, min(50, U[i]))
+
+        u_applied = U[0]
+        zmp = sum(C[j]*x[j] for j in range(3))
+        ref_now = int(t / step_duration) * step_length
+
+        t_log.append(t)
+        com_log.append(x[0])
+        zmp_log.append(zmp)
+        ref_log.append(ref_now)
+
+        x = [
+            sum(A[i][j]*x[j] for j in range(3)) + B[i]*u_applied
+            for i in range(3)
+        ]
+    return t_log, com_log, zmp_log, ref_log
+
+horizons = [5, 15, 30]
+results = {}
+for nh in horizons:
+    results[nh] = run_mpc_sim(nh)
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
+
+for idx, nh in enumerate(horizons):
+    t_arr, com_arr, zmp_arr, ref_arr = results[nh]
+    t_np = np.array(t_arr)
+    zmp_np = np.array(zmp_arr)
+    ref_np = np.array(ref_arr)
+
+    tracking_rmse = float(np.sqrt(np.mean((zmp_np - ref_np)**2)))
+
+    ax = axes[idx]
+    ax.plot(t_np, com_arr, 'b-', linewidth=1.0, label='CoM_x')
+    ax.plot(t_np, zmp_arr, 'g-', linewidth=0.7, label='ZMP')
+    ax.plot(t_np, ref_arr, 'r--', linewidth=0.8, label='ZMP_ref')
+    ax.set_xlabel('Time (s)')
+    if idx == 0:
+        ax.set_ylabel('Position (m)')
+    ax.set_title('N = {}'.format(nh))
+    ax.legend(fontsize=7, loc='upper left')
+    ax.grid(True, alpha=0.3)
+    ax.annotate('RMSE = {:.4f} m'.format(tracking_rmse),
+                xy=(0.98, 0.02), xycoords='axes fraction',
+                ha='right', va='bottom', fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.3',
+                          fc='wheat', alpha=0.7))
+
+fig.suptitle('Effect of Prediction Horizon on MPC Tracking',
+             fontsize=13)
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print('data:image/png;base64,' + img)
+plt.close()
+
+print()
+print("=== Horizon Comparison Summary ===")
+for nh in horizons:
+    _, _, zmp_arr, ref_arr = results[nh]
+    zmp_np = np.array(zmp_arr)
+    ref_np = np.array(ref_arr)
+    rmse = float(np.sqrt(np.mean((zmp_np - ref_np)**2)))
+    print("N={:2d}  horizon={:.2f}s  ZMP RMSE={:.5f} m".format(
+        nh, nh*T, rmse))`}
+/>
+
+With a short horizon ($N=5$, only 0.10 s lookahead), the controller cannot
+anticipate the next footstep transition and reacts late, producing large
+tracking errors at each step change. A moderate horizon ($N=15$, 0.30 s)
+provides enough lookahead to begin transitioning the CoM before the step
+change, improving tracking significantly. A long horizon ($N=30$, 0.60 s)
+sees one full step ahead and achieves the best tracking, though with
+diminishing returns beyond a certain point.
 
 ## Handling Constraints
 
