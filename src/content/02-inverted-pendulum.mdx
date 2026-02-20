@@ -215,14 +215,61 @@ steps = int(t_end / dt)
 print("Time(s)  x(m)     xdot(m/s)  Energy")
 print("-" * 45)
 
-for i in range(0, steps + 1, 10):
+time_list = []
+x_list = []
+xdot_list = []
+
+for i in range(0, steps + 1):
     t = i * dt
     # Analytical solution (support at origin)
     x = x0 * math.cosh(omega * t) + (xd0 / omega) * math.sinh(omega * t)
     xdot = x0 * omega * math.sinh(omega * t) + xd0 * math.cosh(omega * t)
+    time_list.append(t)
+    x_list.append(x)
+    xdot_list.append(xdot)
     # Orbital energy (should be conserved)
-    energy = 0.5 * xdot**2 - 0.5 * omega**2 * x**2
-    print(f"{t:5.2f}    {x:7.4f}  {xdot:7.4f}    {energy:7.4f}")
+    if i % 10 == 0:
+        energy = 0.5 * xdot**2 - 0.5 * omega**2 * x**2
+        print(f"{t:5.2f}    {x:7.4f}  {xdot:7.4f}    {energy:7.4f}")
+
+# Plot time series and phase plane
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+
+# Upper: time series of x(t) and xdot(t)
+axes[0].plot(time_list, x_list, label='x(t) [m]', color='tab:blue')
+axes[0].plot(time_list, xdot_list, label='xdot(t) [m/s]',
+             color='tab:orange')
+axes[0].set_xlabel('Time [s]')
+axes[0].set_ylabel('Value')
+axes[0].set_title('LIPM Trajectory: Time Series')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+# Lower: phase plane (x vs xdot)
+axes[1].plot(x_list, xdot_list, color='tab:green', linewidth=2)
+axes[1].plot(x_list[0], xdot_list[0], 'o', color='tab:blue',
+             markersize=8, label='Start')
+axes[1].plot(x_list[-1], xdot_list[-1], 's', color='tab:red',
+             markersize=8, label='End')
+axes[1].set_xlabel('x [m]')
+axes[1].set_ylabel('xdot [m/s]')
+axes[1].set_title('LIPM Trajectory: Phase Plane')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
 `}
 />
 
@@ -291,21 +338,160 @@ support_x = 0.0
 print("Step  t(s)    CoM_x(m)  Velocity(m/s)  Support(m)")
 print("-" * 55)
 
-for step in range(5):
+num_steps = 5
+dt = 0.01
+com_trajectory = []
+support_points = [support_x]
+
+for step in range(num_steps):
     # Simulate one step
-    for i in range(int(T_step / 0.01) + 1):
-        t = i * 0.01
+    n_substeps = int(T_step / dt) + 1
+    for i in range(n_substeps):
+        t = i * dt
         dx = x - support_x
-        x_t = support_x + dx * math.cosh(omega * t) + (xdot / omega) * math.sinh(omega * t)
-        xdot_t = dx * omega * math.sinh(omega * t) + xdot * math.cosh(omega * t)
+        x_t = (support_x + dx * math.cosh(omega * t)
+               + (xdot / omega) * math.sinh(omega * t))
+        xdot_t = (dx * omega * math.sinh(omega * t)
+                  + xdot * math.cosh(omega * t))
+        com_trajectory.append(x_t)
 
     # State at end of step
     x = x_t
     xdot = xdot_t
-    print(f"  {step}    {(step+1)*T_step:.2f}   {x:8.4f}     {xdot:8.4f}      {support_x:.3f}")
+    print(f"  {step}    {(step+1)*T_step:.2f}   {x:8.4f}"
+          f"     {xdot:8.4f}      {support_x:.3f}")
 
     # Transition: shift support to new foot
     support_x += step_length
+    support_points.append(support_x)
+
+# Plot multi-step CoM trajectory
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+total_samples = len(com_trajectory)
+time_array = [i * dt for i in range(total_samples)]
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(time_array, com_trajectory, color='tab:blue',
+        linewidth=1.5, label='CoM x(t)')
+
+# Mark support point transitions
+for idx, sp in enumerate(support_points):
+    t_switch = idx * T_step
+    ax.axvline(x=t_switch, color='gray', linestyle='--',
+               alpha=0.5)
+    ax.plot(t_switch, sp, 'v', color='tab:red', markersize=10,
+            label='Support' if idx == 0 else None)
+
+ax.set_xlabel('Time [s]')
+ax.set_ylabel('x position [m]')
+ax.set_title('Multi-Step LIPM Walking: CoM Trajectory')
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
+`}
+/>
+
+## Simulation: LIPM Phase Portrait
+
+The phase portrait reveals the global structure of LIPM dynamics.
+Trajectories are classified by their orbital energy $E$:
+positive energy (walking), zero energy (separatrix), and negative energy (oscillation).
+
+<CodeEditor
+  initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+# LIPM parameters
+g = 9.81
+z_c = 0.8
+omega = math.sqrt(g / z_c)
+
+print(f"omega = {omega:.3f} rad/s")
+print()
+
+# Generate phase portrait
+x_range = np.linspace(-0.3, 0.3, 400)
+
+fig, ax = plt.subplots(figsize=(8, 6))
+
+# E < 0: oscillatory trajectories (not physical for walking)
+energy_neg = [-0.01, -0.03, -0.06]
+for e_val in energy_neg:
+    # xdot^2 = 2*E + omega^2 * x^2, only valid where >= 0
+    xdot_sq = 2 * e_val + omega**2 * x_range**2
+    valid = xdot_sq >= 0
+    if np.any(valid):
+        xdot_pos = np.sqrt(xdot_sq[valid])
+        ax.plot(x_range[valid], xdot_pos,
+                color='tab:blue', alpha=0.7, linewidth=1)
+        ax.plot(x_range[valid], -xdot_pos,
+                color='tab:blue', alpha=0.7, linewidth=1)
+    print(f"E = {e_val:.2f}: closed orbit (oscillation)")
+
+# E = 0: separatrix
+xdot_sep_pos = omega * np.abs(x_range)
+ax.plot(x_range, xdot_sep_pos, color='black',
+        linewidth=3, label='E = 0 (separatrix)')
+ax.plot(x_range, -xdot_sep_pos, color='black',
+        linewidth=3)
+print(f"E =  0.00: separatrix (boundary)")
+
+# E > 0: walking trajectories
+energy_pos = [0.01, 0.03, 0.06]
+for e_val in energy_pos:
+    xdot_sq = 2 * e_val + omega**2 * x_range**2
+    xdot_pos = np.sqrt(xdot_sq)
+    ax.plot(x_range, xdot_pos,
+            color='tab:red', alpha=0.7, linewidth=1)
+    ax.plot(x_range, -xdot_pos,
+            color='tab:red', alpha=0.7, linewidth=1)
+    print(f"E = {e_val:5.2f}: open orbit (walking)")
+
+# Labels and formatting
+ax.set_xlabel('x [m]', fontsize=12)
+ax.set_ylabel('xdot [m/s]', fontsize=12)
+ax.set_title('LIPM Phase Portrait', fontsize=14)
+ax.axhline(y=0, color='gray', linewidth=0.5)
+ax.axvline(x=0, color='gray', linewidth=0.5)
+
+# Custom legend
+from matplotlib.lines import Line2D
+legend_items = [
+    Line2D([0], [0], color='tab:red', linewidth=2,
+           label='E > 0 (walking)'),
+    Line2D([0], [0], color='black', linewidth=3,
+           label='E = 0 (separatrix)'),
+    Line2D([0], [0], color='tab:blue', linewidth=2,
+           label='E < 0 (oscillation)'),
+]
+ax.legend(handles=legend_items, fontsize=11)
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-0.3, 0.3)
+ax.set_ylim(-1.2, 1.2)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
 `}
 />
 
