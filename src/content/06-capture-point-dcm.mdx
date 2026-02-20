@@ -94,6 +94,11 @@ When pushed, the robot's DCM shifts. Recovery strategies:
 
 <CodeEditor
   initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
 
 # Push recovery using capture point
 g = 9.81
@@ -101,10 +106,9 @@ z_c = 0.8
 omega = math.sqrt(g / z_c)
 
 # Initial state (standing still)
-x = 0.0      # CoM position
-xdot = 0.0   # CoM velocity
+x = 0.0
+xdot = 0.0
 
-# Compute capture point
 xi = x + xdot / omega
 print("=== Before Push ===")
 print(f"CoM: {x:.3f} m, Vel: {xdot:.3f} m/s")
@@ -121,142 +125,67 @@ print(f"CoM: {x:.3f} m, Vel: {xdot:.3f} m/s")
 print(f"Capture Point: {xi:.4f} m")
 print()
 
-# Foot size (can the ankle strategy handle it?)
-foot_half_length = 0.12  # m
+foot_half_length = 0.12
 if abs(xi) <= foot_half_length:
-    print(f"Ankle strategy sufficient!")
-    print(f"  Move CoP to {xi:.4f} m (within foot [{-foot_half_length:.2f}, {foot_half_length:.2f}])")
+    print("Ankle strategy sufficient!")
+    print(f"  Move CoP to {xi:.4f} m")
 else:
-    print(f"Need stepping strategy!")
-    print(f"  Capture point {xi:.4f} m is outside foot boundary")
+    print("Need stepping strategy!")
+    print(f"  Capture point {xi:.4f} m outside foot")
     print(f"  Must step to {xi:.4f} m to recover")
-
 print()
-print("=== Recovery Simulation ===")
+
 # Simulate recovery by stepping to capture point
-r = xi  # place foot at capture point
+r = xi
 dt = 0.01
+n_sim = 100
+
+time_arr = []
+com_arr = []
+dcm_arr = []
+cp_arr = []
+
+print("=== Recovery Simulation ===")
 print("Time(s)  CoM(m)   Vel(m/s)  DCM(m)")
 print("-" * 42)
 
-for i in range(100):
+for i in range(n_sim):
     t = i * dt
-    # DCM dynamics: xi_dot = omega * (xi - r)
     xi_dot = omega * (xi - r)
     xi += xi_dot * dt
-    # CoM dynamics: x_dot = -omega * (x - xi)
     xdot = -omega * (x - xi)
     x += xdot * dt
 
+    time_arr.append(t)
+    com_arr.append(x)
+    dcm_arr.append(xi)
+    cp_arr.append(x + xdot / omega)
+
     if i % 10 == 0:
         print(f"{t:5.2f}    {x:7.4f}  {xdot:7.4f}   {xi:7.4f}")
+
+# Plot recovery trajectory
+fig, ax = plt.subplots(figsize=(7, 4))
+ax.plot(time_arr, com_arr, 'b-', linewidth=2, label='CoM')
+ax.plot(time_arr, dcm_arr, 'r--', linewidth=2, label='DCM')
+ax.plot(time_arr, cp_arr, 'g:', linewidth=1.5, label='Capture Pt')
+ax.axhline(y=r, color='orange', linestyle='-.',
+           linewidth=1, label='Foot (CoP)')
+ax.axhline(y=foot_half_length, color='gray',
+           linestyle=':', linewidth=0.8, label='Foot boundary')
+ax.axhline(y=-foot_half_length, color='gray',
+           linestyle=':', linewidth=0.8)
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Position (m)')
+ax.set_title('Push Recovery: CoM, DCM, and Capture Point')
+ax.legend(fontsize=8)
+ax.grid(True, alpha=0.3)
+
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
 `}
 />
-
-## DCM-Based Walking Control
-
-<DCMWalkingDiagram />
-
-DCM planning works **backward** from the final step:
-
-1. Choose the final DCM position (at the last footstep)
-2. Compute DCM waypoints at each step transition backward in time
-3. Interpolate DCM trajectory between waypoints
-4. The CoM naturally follows
-
-### DCM Waypoint Computation
-
-At the end of step $n$, the DCM should be at waypoint $\boldsymbol{\xi}_n$.
-Working backward:
-
-$$
-\boldsymbol{\xi}_n = \mathbf{r}_{n+1} + e^{-\omega T_s}(\boldsymbol{\xi}_{n+1} - \mathbf{r}_{n+1})
-$$
-
-where $\mathbf{r}_{n+1}$ is the next footstep position and $T_s$ is the step duration.
-
-<CodeEditor
-  initialCode={`import math
-
-# DCM-based walking trajectory generation
-g = 9.81
-z_c = 0.8
-omega = math.sqrt(g / z_c)
-T_step = 0.6  # step duration
-
-# Footstep positions (x-direction)
-footsteps = [0.0, 0.2, 0.4, 0.6, 0.8, 0.8]
-
-print("=== DCM Waypoint Planning (Backward) ===")
-n_steps = len(footsteps)
-
-# Final DCM = final footstep (robot stops)
-dcm_waypoints = [0.0] * n_steps
-dcm_waypoints[-1] = footsteps[-1]
-
-# Compute backward
-for i in range(n_steps - 2, -1, -1):
-    r_next = footsteps[i + 1]
-    xi_next = dcm_waypoints[i + 1]
-    dcm_waypoints[i] = r_next + math.exp(-omega * T_step) * (xi_next - r_next)
-
-print("Step  Foot(m)   DCM_waypoint(m)")
-print("-" * 38)
-for i in range(n_steps):
-    print(f"  {i}    {footsteps[i]:.3f}     {dcm_waypoints[i]:.4f}")
-
-# Forward simulation
-print()
-print("=== Forward Simulation ===")
-print("Time(s)  CoM(m)   DCM(m)   CoP(m)")
-print("-" * 42)
-
-x = 0.0
-xdot = 0.0
-dt = 0.01
-sim_steps = int(T_step * (n_steps - 1) / dt)
-
-for k in range(sim_steps):
-    t = k * dt
-    step_idx = min(int(t / T_step), n_steps - 2)
-    r = footsteps[step_idx]
-
-    xi = x + xdot / omega
-
-    # CoP to track DCM reference
-    t_in_step = t - step_idx * T_step
-    xi_start = dcm_waypoints[step_idx]
-    xi_end = dcm_waypoints[step_idx + 1]
-    xi_ref = r + (xi_start - r) * math.exp(omega * t_in_step)
-
-    # DCM tracking controller
-    cop = xi_ref - (1/omega) * omega * (xi_ref - r)
-
-    # LIPM dynamics
-    xddot = omega**2 * (x - cop)
-    xdot += xddot * dt
-    x += xdot * dt
-
-    if k % 60 == 0:
-        print(f"{t:5.2f}    {x:7.4f}  {xi:7.4f}   {cop:7.4f}")
-`}
-/>
-
-## Advantages Over ZMP-Based Methods
-
-1. **Intuitive**: directly answers "where to step"
-2. **Push recovery**: naturally extends to disturbance handling
-3. **First-order dynamics**: DCM is easier to control than second-order CoM
-4. **Backward planning**: guarantees the robot can stop at the final step
-
-## References
-
-- J. Pratt et al., "[Capture Point: A Step toward Humanoid Push Recovery](https://doi.org/10.1109/ICHR.2006.321385)," *Proc. IEEE-RAS Humanoids*, 2006.
-- J. Englsberger et al., "[Three-Dimensional Bipedal Walking Control Based on Divergent Component of Motion](https://doi.org/10.1109/TRO.2015.2405592)," *IEEE Trans. Robotics*, 2015.
-- T. Koolen et al., "[Capturability-based analysis and control of legged locomotion](https://doi.org/10.1177/0278364912452673)," *Int. J. Robotics Research*, 2012.
-
-<InteractiveDemo title="Push Recovery Simulation">
-  <p className="text-sm text-gray-500">
-    Interactive push recovery simulation with capture point visualization coming soon.
-  </p>
-</InteractiveDemo>
