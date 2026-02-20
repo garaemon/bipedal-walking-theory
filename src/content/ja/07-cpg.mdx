@@ -89,6 +89,118 @@ $$
 
 <HopfOscillatorDiagram />
 
+## Simulation: Hopf Oscillator Dynamics
+
+以下のシミュレーションは、異なる初期条件からHopf振動子がリミットサイクルに収束する様子を示します。左パネルはx-y位相面での軌道が半径 $\sqrt{\mu}$ の円に収束する様子、右パネルは振幅 $r(t)$ の時間発展を示します。
+
+<CodeEditor
+  initialCode={`import math
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+# Hopf oscillator parameters
+mu = 1.0       # amplitude parameter -> limit cycle at r = sqrt(mu) = 1.0
+alpha = 5.0    # convergence rate
+omega = 2 * math.pi * 1.0  # oscillation frequency (1 Hz)
+
+# Different initial radii to show convergence
+initial_radii = [0.1, 0.5, 1.0, 1.5, 2.0]
+dt = 0.002
+sim_time = 3.0
+num_steps = int(sim_time / dt)
+
+print("=== Hopf Oscillator Simulation ===")
+print(f"mu = {mu}, alpha = {alpha}, omega = {omega/(2*math.pi):.1f} Hz")
+print(f"Limit cycle radius: r* = sqrt(mu) = {math.sqrt(mu):.2f}")
+print()
+
+def simulate_hopf(r0, mu_val, alpha_val, omega_val, dt_val, n_steps):
+    """Simulate Hopf oscillator from initial radius r0."""
+    x = r0
+    y = 0.0
+    xs, ys, rs, ts = [x], [y], [r0], [0.0]
+    for k in range(1, n_steps):
+        r_sq = x * x + y * y
+        dx = alpha_val * (mu_val - r_sq) * x - omega_val * y
+        dy = alpha_val * (mu_val - r_sq) * y + omega_val * x
+        x += dx * dt_val
+        y += dy * dt_val
+        xs.append(x)
+        ys.append(y)
+        rs.append(math.sqrt(x * x + y * y))
+        ts.append(k * dt_val)
+    return xs, ys, rs, ts
+
+# Run simulations and print summary
+trajectories = {}
+for r0 in initial_radii:
+    xs, ys, rs, ts = simulate_hopf(r0, mu, alpha, omega, dt, num_steps)
+    trajectories[r0] = (xs, ys, rs, ts)
+    print(f"r0 = {r0:.1f} -> final r = {rs[-1]:.4f}")
+
+print()
+print("All trajectories converge to r = 1.0 (the limit cycle)")
+
+def plot_hopf_phase_plane(traj_data, mu_val):
+    """Plot Hopf oscillator phase plane and r(t) time series."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    colors = ["#2563eb", "#16a34a", "#ea580c", "#dc2626", "#7c3aed"]
+    r_star = np.sqrt(mu_val)
+
+    ax_phase = axes[0]
+    theta_circle = np.linspace(0, 2 * np.pi, 200)
+    ax_phase.plot(
+        r_star * np.cos(theta_circle),
+        r_star * np.sin(theta_circle),
+        "k--", linewidth=1.5, alpha=0.5,
+        label=f"Limit cycle (r={r_star:.1f})"
+    )
+    for idx, (r0, (xs, ys, rs, ts)) in enumerate(traj_data.items()):
+        ax_phase.plot(xs, ys, color=colors[idx], linewidth=0.8,
+                      alpha=0.8, label=f"r0 = {r0:.1f}")
+        ax_phase.plot(xs[0], ys[0], "o", color=colors[idx],
+                      markersize=6)
+    ax_phase.set_xlabel("x")
+    ax_phase.set_ylabel("y")
+    ax_phase.set_title("Phase Plane (x-y)", fontweight="bold")
+    ax_phase.set_aspect("equal")
+    ax_phase.legend(fontsize=7, loc="upper right")
+    ax_phase.grid(True, alpha=0.3)
+    ax_phase.set_xlim(-2.3, 2.3)
+    ax_phase.set_ylim(-2.3, 2.3)
+
+    ax_r = axes[1]
+    ax_r.axhline(y=r_star, color="k", linestyle="--",
+                 linewidth=1.5, alpha=0.5, label=f"r* = {r_star:.1f}")
+    for idx, (r0, (xs, ys, rs, ts)) in enumerate(traj_data.items()):
+        ax_r.plot(ts, rs, color=colors[idx], linewidth=1.3,
+                  label=f"r0 = {r0:.1f}")
+    ax_r.set_xlabel("Time (s)")
+    ax_r.set_ylabel("r(t)")
+    ax_r.set_title("Amplitude Convergence", fontweight="bold")
+    ax_r.legend(fontsize=8)
+    ax_r.grid(True, alpha=0.3)
+
+    fig.suptitle(
+        "Hopf Oscillator: Convergence to Limit Cycle",
+        fontsize=13, fontweight="bold"
+    )
+    fig.tight_layout()
+    return fig
+
+buf = io.BytesIO()
+fig = plot_hopf_phase_plane(trajectories, mu)
+fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close(fig)
+`}
+/>
+
 <CodeEditor
   initialCode={`import math
 
@@ -123,6 +235,12 @@ dt = 0.001
 sim_time = 3.0
 steps = int(sim_time / dt)
 
+# Record history for plotting
+record_interval = 10
+time_history = []
+angle_history = [[], [], [], []]
+phase_diff_history = []
+
 print("=== CPG Simulation ===")
 print(f"Walking frequency: {omega_base/(2*math.pi):.1f} Hz")
 print()
@@ -143,6 +261,16 @@ for k in range(steps):
     for i in range(4):
         phi[i] += dphi[i] * dt
 
+    # Record data for plotting
+    if k % record_interval == 0:
+        time_history.append(t)
+        for i in range(4):
+            angle_history[i].append(math.sin(phi[i]))
+        pd = (phi[1] - phi[0]) % (2 * math.pi)
+        if pd > math.pi:
+            pd -= 2 * math.pi
+        phase_diff_history.append(pd)
+
     # Print joint angles (sine of phase as proxy)
     if k % 300 == 0:
         angles = [math.sin(phi[i]) for i in range(4)]
@@ -155,6 +283,68 @@ for k in range(steps):
 
 print()
 print("Phase difference should converge to pi (anti-phase)")
+
+# --- Plot joint angles and phase convergence ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def plot_cpg_results(time_hist, angle_hist, phase_hist):
+    """Plot 4-panel CPG simulation results."""
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
+    labels = ["L_Hip", "R_Hip", "L_Knee", "R_Knee"]
+    colors = ["#2563eb", "#dc2626", "#16a34a", "#ea580c"]
+    t = np.array(time_hist)
+
+    for idx in range(4):
+        ax = axes[idx // 2][idx % 2]
+        ax.plot(t, angle_hist[idx], color=colors[idx], linewidth=1.2)
+        ax.set_title(labels[idx], fontsize=12, fontweight="bold")
+        ax.set_ylabel("sin(phi)")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylim(-1.3, 1.3)
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle(
+        "CPG Joint Angle Trajectories (sin of phase)",
+        fontsize=13, fontweight="bold"
+    )
+    fig.tight_layout()
+    return fig
+
+def plot_phase_convergence(time_hist, phase_hist):
+    """Plot phase difference convergence to pi."""
+    fig, ax = plt.subplots(figsize=(8, 3.5))
+    t = np.array(time_hist)
+    pd = np.array(phase_hist)
+    ax.plot(t, pd / np.pi, color="#7c3aed", linewidth=1.5)
+    ax.axhline(y=1.0, color="#dc2626", linestyle="--", alpha=0.7,
+               label="Target (pi)")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Phase diff (L-R hip) / pi")
+    ax.set_title("Phase Difference Convergence", fontweight="bold")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+def save_and_print_figure(fig):
+    """Encode figure as base64 PNG and print for display."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+    buf.seek(0)
+    img = base64.b64encode(buf.read()).decode("utf-8")
+    print(f"data:image/png;base64,{img}")
+    plt.close(fig)
+
+save_and_print_figure(plot_cpg_results(
+    time_history, angle_history, phase_diff_history
+))
+save_and_print_figure(plot_phase_convergence(
+    time_history, phase_diff_history
+))
 `}
 />
 
@@ -184,29 +374,86 @@ print("=== CPG Frequency Modulation ===")
 print()
 
 dt = 0.001
+all_waveforms = {}
+
 for name, freq in speeds:
     omega = 2 * math.pi * freq
     amplitude = 0.3 + 0.15 * freq  # larger steps at higher speed
 
-    # Simulate one cycle
-    period = 1.0 / freq
-    steps = int(period / dt)
+    # Simulate two cycles for visualization
+    sim_duration = 2.0
+    num_steps = int(sim_duration / dt)
     max_vel = 0
+    times = []
     positions = []
 
     phi = 0.0
-    for k in range(steps):
+    for k in range(num_steps):
+        t = k * dt
         phi += omega * dt
         pos = amplitude * math.sin(phi)
         vel = amplitude * omega * math.cos(phi)
         max_vel = max(max_vel, abs(vel))
+        times.append(t)
         positions.append(pos)
 
+    period = 1.0 / freq
     print(f"{name} ({freq:.1f} Hz):")
     print(f"  Period: {period:.3f} s")
     print(f"  Amplitude: {amplitude:.2f} rad")
     print(f"  Max angular velocity: {max_vel:.2f} rad/s")
     print()
+
+    all_waveforms[name] = (times, positions, freq, amplitude)
+
+# --- Plot overlaid waveforms ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def plot_frequency_modulation(waveforms):
+    """Plot joint angle waveforms at different walking speeds."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    colors = ["#2563eb", "#16a34a", "#ea580c", "#dc2626"]
+
+    ax_wave = axes[0]
+    for idx, (name, (ts, ps, freq, amp)) in enumerate(waveforms.items()):
+        ax_wave.plot(ts, ps, color=colors[idx], linewidth=1.3,
+                     label=f"{name} ({freq:.1f} Hz)")
+    ax_wave.set_xlabel("Time (s)")
+    ax_wave.set_ylabel("Joint angle (rad)")
+    ax_wave.set_title("Joint Angle Waveforms", fontweight="bold")
+    ax_wave.legend(fontsize=8)
+    ax_wave.grid(True, alpha=0.3)
+
+    ax_amp = axes[1]
+    freqs = [v[2] for v in waveforms.values()]
+    amps = [v[3] for v in waveforms.values()]
+    ax_amp.bar(
+        [f"{f:.1f} Hz" for f in freqs], amps,
+        color=colors[:len(freqs)], alpha=0.8
+    )
+    ax_amp.set_xlabel("Walking frequency")
+    ax_amp.set_ylabel("Amplitude (rad)")
+    ax_amp.set_title("Amplitude vs Frequency", fontweight="bold")
+    ax_amp.grid(True, alpha=0.3, axis="y")
+
+    fig.suptitle(
+        "CPG Frequency Modulation",
+        fontsize=13, fontweight="bold"
+    )
+    fig.tight_layout()
+    return fig
+
+buf = io.BytesIO()
+fig = plot_frequency_modulation(all_waveforms)
+fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close(fig)
 `}
 />
 
