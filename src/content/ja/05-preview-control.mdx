@@ -113,6 +113,11 @@ $A_e$ の一番上の行は出力方程式 $p = C\mathbf{x}$ を使ってZMP誤�
 
 <CodeEditor
   initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
 
 # Preview control gain computation (simplified)
 # Using the LIPM state-space model
@@ -155,6 +160,12 @@ integral_error = 0.0
 sim_time = 3.0
 steps_sim = int(sim_time / T)
 
+# Store data for plotting
+time_data = []
+com_y_data = []
+zmp_y_data = []
+zmp_ref_y_data = []
+
 print("Time(s)  CoM_y(mm)  ZMP_y(mm)  ZMP_ref(mm)")
 print("-" * 50)
 
@@ -183,12 +194,50 @@ for k in range(steps_sim):
     ]
     x = x_new
 
+    # Record data
+    time_data.append(t)
+    com_y_data.append(x[0] * 1000)
+    zmp_y_data.append(p * 1000)
+    zmp_ref_y_data.append(zmp_ref * 1000)
+
     if k % 50 == 0:
         print(f"{t:5.2f}    {x[0]*1000:8.2f}   {p*1000:8.2f}    {zmp_ref*1000:8.2f}")
 
 print()
 print("Note: Full preview control uses future ZMP reference")
 print("values for better anticipation and smoother tracking.")
+
+# Plot CoM and ZMP trajectories
+time_arr = np.array(time_data)
+com_arr = np.array(com_y_data)
+zmp_arr = np.array(zmp_y_data)
+ref_arr = np.array(zmp_ref_y_data)
+
+fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+
+axes[0].plot(time_arr, com_arr, 'b-', label='CoM_y')
+axes[0].plot(time_arr, ref_arr, 'r--', label='ZMP_ref_y')
+axes[0].set_xlabel('Time (s)')
+axes[0].set_ylabel('Position (mm)')
+axes[0].set_title('Lateral Preview Control: CoM vs ZMP Reference')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+tracking_error = zmp_arr - ref_arr
+axes[1].plot(time_arr, tracking_error, 'g-', linewidth=1)
+axes[1].set_xlabel('Time (s)')
+axes[1].set_ylabel('Error (mm)')
+axes[1].set_title('ZMP Tracking Error (ZMP_y - ZMP_ref_y)')
+axes[1].grid(True, alpha=0.3)
+axes[1].axhline(y=0, color='k', linewidth=0.5)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
 `}
 />
 
@@ -205,6 +254,11 @@ ZMPベースの歩行のための完全なパイプライン:
 
 <CodeEditor
   initialCode={`import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
 
 # Walking pattern generation with preview control
 g = 9.81
@@ -252,6 +306,11 @@ print("-" * 55)
 integral_e = 0.0
 Gi, Gx0, Gx1, Gx2 = 800, 5e5, 5e3, 25
 
+# Initialize data storage for plotting
+time_data = []
+com_x_data = []
+zmp_ref_x_data = []
+
 for k in range(n_steps):
     t = k * T
     p = C[0]*x[0] + C[1]*x[1] + C[2]*x[2]
@@ -265,8 +324,155 @@ for k in range(n_steps):
         x[2] + T*u,
     ]
 
+    time_data.append(t)
+    com_x_data.append(x[0])
+    zmp_ref_x_data.append(zmp_ref_x[k])
+
     if k % 60 == 0:
         print(f"{t:5.2f}    {x[0]:7.4f}   {p:7.4f}   {zmp_ref_x[k]:7.4f}    {e*1000:+6.2f}")
+
+# Plot sagittal CoM vs ZMP reference
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+time_arr = np.array(time_data)
+ax.plot(time_arr, com_x_data, 'b-', label='CoM_x')
+ax.plot(time_arr, zmp_ref_x_data, 'r--', label='ZMP_ref_x')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Position (m)')
+ax.set_title('Sagittal Walking Pattern: CoM vs ZMP Reference')
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
+`}
+/>
+
+## \u30b7\u30df\u30e5\u30ec\u30fc\u30b7\u30e7\u30f3: \u30d7\u30ec\u30d3\u30e5\u30fc\u30b2\u30a4\u30f3\u5206\u6790
+
+\u30d7\u30ec\u30d3\u30e5\u30fc\u30b2\u30a4\u30f3 $G_p(j)$ \u306f\u3001\u5404\u5c06\u6765\u53c2\u7167\u30b9\u30c6\u30c3\u30d7\u304c\u73fe\u5728\u306e\u5236\u5fa1\u5165\u529b\u306b\u3069\u308c\u3060\u3051\u5f71\u97ff\u3059\u308b\u304b\u3092\u6c7a\u5b9a\u3057\u307e\u3059\u3002$j$ \u304c\u5897\u52a0\u3059\u308b\u3068\u30b2\u30a4\u30f3\u306f\u6e1b\u8870\u3057\u3001\u9060\u3044\u5c06\u6765\u306e\u53c2\u7167\u306e\u5bc4\u4e0e\u304c\u5c0f\u3055\u304f\u306a\u308a\u307e\u3059\u3002\u4ee5\u4e0b\u306e\u30b7\u30df\u30e5\u30ec\u30fc\u30b7\u30e7\u30f3\u3067\u306f\u3001\u7570\u306a\u308b\u30d7\u30ec\u30d3\u30e5\u30fc\u30db\u30e9\u30a4\u30ba\u30f3\u9577\u306b\u5bfe\u3057\u3066\u3053\u308c\u3089\u306e\u30b2\u30a4\u30f3\u3092\u8a08\u7b97\u30fb\u53ef\u8996\u5316\u3057\u307e\u3059\u3002
+
+<CodeEditor
+  initialCode={`import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+g = 9.81
+z_c = 0.8
+T = 0.01
+Qe = 1.0
+R = 1e-6
+
+def build_augmented_system(T, z_c, g):
+    """Build augmented state-space matrices for preview control."""
+    A = np.array([
+        [1, T, T**2/2],
+        [0, 1, T],
+        [0, 0, 1]
+    ])
+    B = np.array([[T**3/6], [T**2/2], [T]])
+    C = np.array([[1, 0, -z_c/g]])
+    Ae = np.zeros((4, 4))
+    Ae[0, 0] = 1
+    Ae[0, 1:] = (C @ A).flatten()
+    Ae[1:, 1:] = A
+    Be = np.zeros((4, 1))
+    Be[0, 0] = (C @ B).item()
+    Be[1:, :] = B
+    Ce = np.array([[1, 0, 0, 0]])
+    return Ae, Be, Ce
+
+def solve_dare_iterative(Ae, Be, Ce, Qe_val, R_val, n_iter=5000):
+    """Solve DARE by iterating the Riccati recursion."""
+    n = Ae.shape[0]
+    P = np.eye(n) * 0.001
+    Q_mat = Ce.T @ (Qe_val * np.eye(1)) @ Ce
+    for _ in range(n_iter):
+        S = R_val + (Be.T @ P @ Be).item()
+        K = (Be.T @ P @ Ae) / S
+        P_new = Ae.T @ P @ Ae - Ae.T @ P @ Be @ K + Q_mat
+        if np.max(np.abs(P_new - P)) < 1e-12:
+            break
+        P = P_new
+    return P
+
+def compute_preview_gains(Ae, Be, P, R_val, N):
+    """Compute preview gains Gp(j) for j = 0, ..., N-1."""
+    S = R_val + (Be.T @ P @ Be).item()
+    K_fb = (Be.T @ P @ Ae) / S
+    Acl = Ae - Be @ K_fb
+    gains = np.zeros(N)
+    Fj = np.eye(Ae.shape[0])
+    for j in range(N):
+        vec = Fj.T @ P @ np.array([[1], [0], [0], [0]])
+        gains[j] = (Be.T @ vec).item() / S
+        Fj = Fj @ Acl
+    return gains
+
+Ae, Be, Ce = build_augmented_system(T, z_c, g)
+P = solve_dare_iterative(Ae, Be, Ce, Qe, R)
+
+horizon_list = [50, 100, 160]
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+labels = []
+for nh in horizon_list:
+    labels.append(f"N={nh} ({nh*T:.1f}s)")
+
+fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+
+for idx, N_h in enumerate(horizon_list):
+    gp = compute_preview_gains(Ae, Be, P, R, N_h)
+    j_arr = np.arange(N_h)
+    t_arr = j_arr * T
+    markerline, stemlines, baseline = axes[0].stem(
+        t_arr, gp, linefmt=colors[idx],
+        markerfmt='o', basefmt='k-', label=labels[idx]
+    )
+    markerline.set_markersize(2)
+    stemlines.set_linewidth(0.8)
+
+    gp_normalized = gp / np.max(np.abs(gp)) if np.max(np.abs(gp)) > 0 else gp
+    axes[1].plot(t_arr, gp_normalized, color=colors[idx],
+                 linewidth=1.5, label=labels[idx])
+
+axes[0].set_xlabel('Preview time j*T (s)')
+axes[0].set_ylabel('Preview gain Gp(j)')
+axes[0].set_title('Preview Gains: Decay with Horizon')
+axes[0].legend(fontsize=8)
+axes[0].grid(True, alpha=0.3)
+
+axes[1].set_xlabel('Preview time j*T (s)')
+axes[1].set_ylabel('Normalized Gp(j)')
+axes[1].set_title('Normalized Preview Gains')
+axes[1].legend(fontsize=8)
+axes[1].grid(True, alpha=0.3)
+axes[1].axhline(y=0, color='k', linewidth=0.5)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode('utf-8')
+print(f'data:image/png;base64,{img}')
+plt.close()
+
+print("=== Preview Gain Analysis ===")
+for idx, N_h in enumerate(horizon_list):
+    gp = compute_preview_gains(Ae, Be, P, R, N_h)
+    peak = np.max(np.abs(gp))
+    last = np.abs(gp[-1])
+    ratio = last / peak if peak > 0 else 0
+    print(f"N={N_h:3d} ({N_h*T:.1f}s): peak=|Gp|={peak:.4e}, "
+          f"last=|Gp(N-1)|={last:.4e}, ratio={ratio:.4e}")
+print()
+print("The rapid decay confirms that distant future references")
+print("contribute negligibly to the current control input.")
 `}
 />
 
