@@ -8,6 +8,7 @@ interface PyodideInterface {
 
 let pyodideInstance: PyodideInterface | null = null;
 let loadingPromise: Promise<PyodideInterface> | null = null;
+let packagesLoaded = false;
 
 export async function loadPyodide(): Promise<PyodideInterface> {
   if (pyodideInstance) {
@@ -36,8 +37,30 @@ export async function loadPyodide(): Promise<PyodideInterface> {
   return loadingPromise;
 }
 
+async function ensurePackagesLoaded(
+  pyodide: PyodideInterface,
+  code: string,
+): Promise<void> {
+  if (packagesLoaded) return;
+
+  const needsNumpy = /\bimport\s+numpy\b|\bfrom\s+numpy\b/.test(code);
+  const needsMatplotlib =
+    /\bimport\s+matplotlib\b|\bfrom\s+matplotlib\b/.test(code);
+
+  const packages: string[] = [];
+  if (needsNumpy || needsMatplotlib) packages.push("numpy");
+  if (needsMatplotlib) packages.push("matplotlib");
+
+  if (packages.length > 0) {
+    await pyodide.loadPackage(packages);
+    packagesLoaded = true;
+  }
+}
+
 export async function runPython(code: string): Promise<string> {
   const pyodide = await loadPyodide();
+
+  await ensurePackagesLoaded(pyodide, code);
 
   // Capture stdout
   await pyodide.runPythonAsync(`
