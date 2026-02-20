@@ -164,42 +164,34 @@ class SimpleWalker:
         return [self.x, self.v, self.theta, self.omega]
 
     def step(self, action):
-        # Simplified dynamics
-        force = action * 10.0  # scale action
+        """Simulate one time step and return (state, reward, done)."""
+        force = action * 10.0
         dt = 0.02
         g = 9.81
         l = 1.0
         m = 1.0
-
-        # Update angle (inverted pendulum)
+        # Update angle (inverted pendulum dynamics)
         alpha = (g * math.sin(self.theta) + force * math.cos(self.theta)) / l
         self.omega += alpha * dt
         self.theta += self.omega * dt
-
         # Update position
         self.v += force * dt / m
         self.x += self.v * dt
-
         # Compute reward
-        alive = abs(self.theta) < 0.5  # not fallen
+        alive = abs(self.theta) < 0.5
         reward = 0.0
         if alive:
-            reward += 1.0  # alive bonus
-            reward += 0.5 * min(self.v, 1.0)  # forward velocity
-            reward -= 0.1 * abs(self.theta)  # upright bonus
-            reward -= 0.01 * action**2  # energy penalty
-
+            reward += 1.0
+            reward += 0.5 * min(self.v, 1.0)
+            reward -= 0.1 * abs(self.theta)
+            reward -= 0.01 * action**2
         done = not alive
         return self.get_state(), reward, done
-
-# Simple policy: linear function of state
-# theta_policy = weights
-weights = [0.0, 0.0, 0.0, 0.0]
 
 def compute_policy(state, w):
     """Linear policy: action = w . state"""
     action = sum(w[i] * state[i] for i in range(4))
-    return max(-1, min(1, action))  # clip to [-1, 1]
+    return max(-1, min(1, action))
 
 def evaluate_policy(env, w, max_steps=200):
     """Run one episode and return total reward."""
@@ -213,20 +205,23 @@ def evaluate_policy(env, w, max_steps=200):
             break
     return total_reward
 
-# Simple evolution strategy for learning
+# --- Evolution strategy training ---
 env = SimpleWalker()
+weights = [0.0, 0.0, 0.0, 0.0]
 best_weights = weights[:]
 best_reward = evaluate_policy(env, best_weights)
 
 print("=== Simple RL Training (Evolution Strategy) ===")
-print(f"Initial reward: {best_reward:.2f}")
-print()
 print("Gen  Best_Reward  Avg_Reward  Weights")
 print("-" * 60)
 
 n_generations = 30
 n_population = 10
 noise_std = 0.5
+
+best_reward_history = []
+avg_reward_history = []
+weight_history = []
 
 for gen in range(n_generations):
     rewards = []
@@ -243,14 +238,215 @@ for gen in range(n_generations):
         best_reward = rewards[best_idx]
         best_weights = population[best_idx][:]
 
+    best_reward_history.append(best_reward)
+    avg_reward_history.append(avg_r)
+    weight_history.append(best_weights[:])
+
     if gen % 5 == 0:
         w_str = [f"{w:.2f}" for w in best_weights]
         print(f" {gen:2d}      {best_reward:7.2f}     {avg_r:7.2f}    {w_str}")
 
-    noise_std *= 0.95  # decay noise
+    noise_std *= 0.95
 
 print(f"\\nFinal best reward: {best_reward:.2f}")
 print(f"Learned weights: {[f'{w:.3f}' for w in best_weights]}")
+
+# --- Plot learning curves and weight evolution ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+generations = list(range(n_generations))
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 7))
+
+ax1.plot(generations, best_reward_history, "b-o", markersize=3,
+         label="Best Reward")
+ax1.plot(generations, avg_reward_history, "r--s", markersize=3,
+         label="Avg Reward")
+ax1.set_xlabel("Generation")
+ax1.set_ylabel("Reward")
+ax1.set_title("Learning Curve: Evolution Strategy")
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+weight_arr = np.array(weight_history)
+labels = ["w_pos", "w_vel", "w_angle", "w_ang_vel"]
+for i in range(4):
+    ax2.plot(generations, weight_arr[:, i], "-o", markersize=3,
+             label=labels[i])
+ax2.set_xlabel("Generation")
+ax2.set_ylabel("Weight Value")
+ax2.set_title("Weight Evolution Over Training")
+ax2.legend()
+ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
+`}
+/>
+
+## シミュレーション: 報酬コンポーネント分析
+
+学習中、異なる報酬コンポーネントは互いに競合します。総報酬をその構成要素（生存ボーナス、速度報酬、エネルギーペナルティ）に分解することで、学習が進むにつれてエージェントが移動速度とエネルギー効率をどのようにトレードオフしているかを観察できます。
+
+<CodeEditor
+  initialCode={`import math
+import random
+
+# Evolution strategy training with per-component reward tracking.
+# We separate each reward term to visualize how the agent balances
+# competing objectives over the course of training.
+
+random.seed(42)
+
+class WalkerWithRewardBreakdown:
+    """Walker that returns decomposed reward components."""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.x = 0.0
+        self.v = 0.0
+        self.theta = random.uniform(-0.1, 0.1)
+        self.omega = 0.0
+        return self.get_state()
+
+    def get_state(self):
+        return [self.x, self.v, self.theta, self.omega]
+
+    def step(self, action):
+        """Return state, total reward, done, and component dict."""
+        force = action * 10.0
+        dt = 0.02
+        g, l, m = 9.81, 1.0, 1.0
+        alpha = (g * math.sin(self.theta) + force * math.cos(self.theta)) / l
+        self.omega += alpha * dt
+        self.theta += self.omega * dt
+        self.v += force * dt / m
+        self.x += self.v * dt
+
+        alive = abs(self.theta) < 0.5
+        if alive:
+            r_alive = 1.0
+            r_velocity = 0.5 * min(self.v, 1.0)
+            r_energy = -0.01 * action**2
+        else:
+            r_alive = 0.0
+            r_velocity = 0.0
+            r_energy = 0.0
+
+        total = r_alive + r_velocity + r_energy
+        components = {"alive": r_alive, "velocity": r_velocity,
+                      "energy": r_energy}
+        return self.get_state(), total, not alive, components
+
+def compute_policy(state, w):
+    """Linear policy: action = w . state"""
+    action = sum(w[i] * state[i] for i in range(4))
+    return max(-1, min(1, action))
+
+def evaluate_with_components(env, w, max_steps=200):
+    """Run one episode and return total reward + component sums."""
+    state = env.reset()
+    total_reward = 0.0
+    comp_sums = {"alive": 0.0, "velocity": 0.0, "energy": 0.0}
+    for _ in range(max_steps):
+        action = compute_policy(state, w)
+        state, reward, done, comps = env.step(action)
+        total_reward += reward
+        for k in comp_sums:
+            comp_sums[k] += comps[k]
+        if done:
+            break
+    return total_reward, comp_sums
+
+# --- Training loop ---
+env = WalkerWithRewardBreakdown()
+best_weights = [0.0, 0.0, 0.0, 0.0]
+best_reward, _ = evaluate_with_components(env, best_weights)
+
+n_generations = 40
+n_population = 10
+noise_std = 0.5
+
+alive_history = []
+velocity_history = []
+energy_history = []
+
+print("=== Reward Component Analysis ===")
+print("Gen   Total   Alive  Velocity  Energy")
+print("-" * 50)
+
+for gen in range(n_generations):
+    rewards = []
+    population = []
+    comp_list = []
+    for _ in range(n_population):
+        w = [best_weights[i] + random.gauss(0, noise_std) for i in range(4)]
+        r, comps = evaluate_with_components(env, w)
+        rewards.append(r)
+        population.append(w)
+        comp_list.append(comps)
+
+    best_idx = rewards.index(max(rewards))
+    if rewards[best_idx] > best_reward:
+        best_reward = rewards[best_idx]
+        best_weights = population[best_idx][:]
+
+    # Record best individual component breakdown
+    _, best_comps = evaluate_with_components(env, best_weights)
+    alive_history.append(best_comps["alive"])
+    velocity_history.append(best_comps["velocity"])
+    energy_history.append(abs(best_comps["energy"]))
+
+    if gen % 5 == 0:
+        print(f" {gen:2d}   {best_reward:6.1f}  {best_comps['alive']:5.1f}"
+              f"    {best_comps['velocity']:5.1f}"
+              f"    {best_comps['energy']:6.2f}")
+
+    noise_std *= 0.95
+
+print(f"\\nFinal best reward: {best_reward:.2f}")
+
+# --- Stacked area chart of reward components ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+gens = np.arange(n_generations)
+alive_arr = np.array(alive_history)
+vel_arr = np.array(velocity_history)
+energy_arr = np.array(energy_history)
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.stackplot(gens, alive_arr, vel_arr, energy_arr,
+             labels=["Alive Bonus", "Velocity Reward",
+                     "Energy Penalty (abs)"],
+             colors=["#4CAF50", "#2196F3", "#FF5722"],
+             alpha=0.8)
+ax.set_xlabel("Generation")
+ax.set_ylabel("Cumulative Reward Component")
+ax.set_title("Reward Component Breakdown Over Training")
+ax.legend(loc="upper left")
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
 `}
 />
 
