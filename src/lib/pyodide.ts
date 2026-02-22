@@ -41,15 +41,21 @@ async function ensurePackagesLoaded(
   pyodide: PyodideInterface,
   code: string,
 ): Promise<void> {
-  if (packagesLoaded) return;
+  if (packagesLoaded) {
+    return;
+  }
 
   const needsNumpy = /\bimport\s+numpy\b|\bfrom\s+numpy\b/.test(code);
   const needsMatplotlib =
     /\bimport\s+matplotlib\b|\bfrom\s+matplotlib\b/.test(code);
 
   const packages: string[] = [];
-  if (needsNumpy || needsMatplotlib) packages.push("numpy");
-  if (needsMatplotlib) packages.push("matplotlib");
+  if (needsNumpy || needsMatplotlib) {
+    packages.push("numpy");
+  }
+  if (needsMatplotlib) {
+    packages.push("matplotlib");
+  }
 
   if (packages.length > 0) {
     await pyodide.loadPackage(packages);
