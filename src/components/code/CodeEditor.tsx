@@ -9,6 +9,8 @@ interface CodeEditorProps {
   initialCode: string;
 }
 
+// Split raw Python output into text and base64 PNG image segments
+// so that inline matplotlib plots can be rendered as <img> elements.
 function parseOutputSegments(
   raw: string,
 ): Array<{ type: "text" | "image"; content: string }> {
