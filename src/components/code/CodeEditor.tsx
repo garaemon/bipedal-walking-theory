@@ -3,8 +3,39 @@
 import { useState, useCallback } from "react";
 import { runPython } from "@/lib/pyodide";
 
+const IMAGE_DATA_PREFIX = "data:image/png;base64,";
+
 interface CodeEditorProps {
   initialCode: string;
+}
+
+// Split raw Python output into text and base64 PNG image segments
+// so that inline matplotlib plots can be rendered as <img> elements.
+function parseOutputSegments(
+  raw: string,
+): Array<{ type: "text" | "image"; content: string }> {
+  const segments: Array<{ type: "text" | "image"; content: string }> = [];
+  const lines = raw.split("\n");
+  let textBuffer: string[] = [];
+
+  const flushText = () => {
+    if (textBuffer.length > 0) {
+      segments.push({ type: "text", content: textBuffer.join("\n") });
+      textBuffer = [];
+    }
+  };
+
+  for (const line of lines) {
+    if (line.startsWith(IMAGE_DATA_PREFIX)) {
+      flushText();
+      segments.push({ type: "image", content: line });
+    } else {
+      textBuffer.push(line);
+    }
+  }
+  flushText();
+
+  return segments;
 }
 
 export function CodeEditor({ initialCode }: CodeEditorProps) {
@@ -27,6 +58,9 @@ export function CodeEditor({ initialCode }: CodeEditorProps) {
     }
   }, [code]);
 
+  const segments = output ? parseOutputSegments(output) : [];
+  const hasOutput = segments.length > 0 || error;
+
   return (
     <div className="my-4 overflow-hidden rounded-lg border border-gray-200">
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
@@ -46,15 +80,32 @@ export function CodeEditor({ initialCode }: CodeEditorProps) {
         rows={Math.max(code.split("\n").length, 4)}
         spellCheck={false}
       />
-      {(output || error) && (
+      {hasOutput && (
         <div className="border-t border-gray-200 bg-gray-50 p-4">
-          <pre
-            className={`whitespace-pre-wrap font-mono text-sm ${
-              error ? "text-red-600" : "text-gray-800"
-            }`}
-          >
-            {error || output}
-          </pre>
+          {error ? (
+            <pre className="whitespace-pre-wrap font-mono text-sm text-red-600">
+              {error}
+            </pre>
+          ) : (
+            segments.map((segment, index) =>
+              segment.type === "image" ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                  key={index}
+                  src={segment.content}
+                  alt="Simulation plot"
+                  className="my-2 max-w-full rounded"
+                />
+              ) : (
+                <pre
+                  key={index}
+                  className="whitespace-pre-wrap font-mono text-sm text-gray-800"
+                >
+                  {segment.content}
+                </pre>
+              ),
+            )
+          )}
         </div>
       )}
     </div>
