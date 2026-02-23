@@ -257,17 +257,15 @@ is stable if $|\rho'(\dot{\theta}^*)| < 1$.
 <CodeEditor
   initialCode={`import math
 
-# HZD gait design for a simple 2-link planar biped
-# Demonstrating Bezier polynomial virtual constraints
-
 def evaluate_bezier(alpha, s):
     """Evaluate Bezier polynomial at normalized phase s."""
     M = len(alpha) - 1
     result = 0.0
     for k in range(M + 1):
-        # Binomial coefficient
-        binom = math.factorial(M) // (math.factorial(k) * math.factorial(M - k))
-        result += alpha[k] * binom * s**k * (1 - s)**(M - k)
+        binom = (math.factorial(M)
+                 // (math.factorial(k)
+                     * math.factorial(M - k)))
+        result += alpha[k] * binom * s**k * (1-s)**(M-k)
     return result
 
 def evaluate_bezier_derivative(alpha, s):
@@ -275,42 +273,82 @@ def evaluate_bezier_derivative(alpha, s):
     M = len(alpha) - 1
     if M == 0:
         return 0.0
-    # Derivative coefficients
-    d_alpha = [M * (alpha[k+1] - alpha[k]) for k in range(M)]
+    d_alpha = [M*(alpha[k+1]-alpha[k]) for k in range(M)]
     return evaluate_bezier(d_alpha, s)
 
-# Bezier coefficients for hip angle trajectory
-# These would normally be found via optimization
 alpha_hip = [0.3, 0.25, 0.1, -0.1, -0.25, -0.3]
-
-# Phase range
-theta_plus = -0.2   # phase at start of step
-theta_minus = 0.2   # phase at end of step
+theta_plus = -0.2
+theta_minus = 0.2
 
 print("=== Virtual Constraint (Hip Angle) ===")
 print(f"Bezier order: {len(alpha_hip) - 1}")
 print(f"Coefficients: {alpha_hip}")
 print(f"Phase range: [{theta_plus:.2f}, {theta_minus:.2f}]")
 print()
-
 print("Phase(s)  Desired_hip(deg)  Velocity(deg/s)")
 print("-" * 48)
 
 for i in range(11):
     s = i / 10.0
-    theta = theta_plus + s * (theta_minus - theta_plus)
-
-    hip_desired = evaluate_bezier(alpha_hip, s)
-    hip_velocity = evaluate_bezier_derivative(alpha_hip, s)
-    hip_velocity /= (theta_minus - theta_plus)  # chain rule
-
-    print(f"  {s:.1f}      {math.degrees(hip_desired):8.2f}         "
-          f"{math.degrees(hip_velocity):8.2f}")
+    hip_d = evaluate_bezier(alpha_hip, s)
+    hip_v = evaluate_bezier_derivative(alpha_hip, s)
+    hip_v /= (theta_minus - theta_plus)
+    print(f"  {s:.1f}      {math.degrees(hip_d):8.2f}"
+          f"         {math.degrees(hip_v):8.2f}")
 
 print()
+start_deg = math.degrees(evaluate_bezier(alpha_hip, 0))
+end_deg = math.degrees(evaluate_bezier(alpha_hip, 1))
 print("The hip angle smoothly transitions from")
-print(f"  {math.degrees(evaluate_bezier(alpha_hip, 0)):.1f} deg (start)")
-print(f"  to {math.degrees(evaluate_bezier(alpha_hip, 1)):.1f} deg (end)")
+print(f"  {start_deg:.1f} deg (start)")
+print(f"  to {end_deg:.1f} deg (end)")
+
+# --- Plot Bezier curve with control points and velocity ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+s_vals = np.linspace(0, 1, 200)
+curve_vals = [evaluate_bezier(alpha_hip, s) for s in s_vals]
+deriv_vals = [
+    evaluate_bezier_derivative(alpha_hip, s)
+    / (theta_minus - theta_plus) for s in s_vals]
+curve_deg = np.degrees(curve_vals)
+deriv_deg = np.degrees(deriv_vals)
+alpha_deg = [math.degrees(a) for a in alpha_hip]
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 6))
+M = len(alpha_hip) - 1
+ctrl_s = [k / M for k in range(M + 1)]
+ax1.plot(s_vals, curve_deg, "b-", linewidth=2,
+         label="Bezier curve")
+ax1.plot(ctrl_s, alpha_deg, "rs--", markersize=8,
+         linewidth=1, label="Control points")
+ax1.fill_between(
+    s_vals, min(alpha_deg), max(alpha_deg),
+    alpha=0.1, color="red", label="Convex hull bound")
+ax1.set_xlabel("Normalized phase s")
+ax1.set_ylabel("Hip angle (deg)")
+ax1.set_title("Bezier Virtual Constraint with Control Points")
+ax1.legend(fontsize=8)
+ax1.grid(True, alpha=0.3)
+
+ax2.plot(s_vals, deriv_deg, "g-", linewidth=2)
+ax2.axhline(y=0, color="k", linestyle="--", linewidth=0.5)
+ax2.set_xlabel("Normalized phase s")
+ax2.set_ylabel("dh/ds (deg/rad)")
+ax2.set_title("Velocity Profile (dh/ds)")
+ax2.grid(True, alpha=0.3)
+
+fig.tight_layout()
+buf = io.BytesIO()
+fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
 `}
 />
 
@@ -337,59 +375,196 @@ Constraints include:
 <CodeEditor
   initialCode={`import math
 
-# Simplified HZD stability analysis
-# Using a scalar Poincare return map
-
-def compute_poincare_map(theta_dot_plus, alpha_hip, step_length=0.3):
+def compute_poincare_map(theta_dot_plus,
+                         step_length=0.3):
     """Simplified return map for zero dynamics."""
-    # Energy-based approximation
-    # In the full model, this involves integrating the zero dynamics
     g = 9.81
-    l = 0.8  # leg length
-
-    # Approximate energy gain/loss during step
+    l = 0.8
     energy_in = theta_dot_plus**2
-    # Impact energy loss (simplified model)
-    impact_ratio = math.cos(2 * math.asin(step_length / (2 * l)))
-
+    half_a = math.asin(step_length / (2 * l))
+    impact_ratio = math.cos(2 * half_a)
     energy_out = energy_in * impact_ratio**2
-    # Add gravity contribution
-    energy_out += 2 * g / l * (1 - math.cos(math.asin(step_length / (2 * l))))
-
+    energy_out += 2*g/l * (1 - math.cos(half_a))
     if energy_out < 0:
         return 0.0
     return math.sqrt(energy_out)
 
-# Find fixed point
 print("=== Poincare Map Analysis ===")
 print()
-
-# Iterate to find fixed point
-theta_dot = 1.5  # initial guess
-print("Iteration  theta_dot_in  theta_dot_out  Converged?")
+theta_dot = 1.5
+print("Iter  theta_dot_in  theta_dot_out  Converged?")
 print("-" * 52)
 
+fixed_point = None
 for i in range(15):
-    theta_dot_out = compute_poincare_map(theta_dot)
-    error = abs(theta_dot_out - theta_dot)
-    converged = "YES" if error < 0.001 else ""
-    print(f"    {i:2d}        {theta_dot:8.4f}      {theta_dot_out:8.4f}     {converged}")
-
-    if error < 0.001:
-        print(f"\\nFixed point: theta_dot* = {theta_dot:.4f} rad/s")
+    td_out = compute_poincare_map(theta_dot)
+    err = abs(td_out - theta_dot)
+    conv = "YES" if err < 0.001 else ""
+    print(f"  {i:2d}      {theta_dot:8.4f}"
+          f"      {td_out:8.4f}       {conv}")
+    if err < 0.001:
+        fixed_point = theta_dot
+        print(f"\\nFixed point: theta_dot* = "
+              f"{theta_dot:.4f} rad/s")
         break
-    theta_dot = theta_dot_out
+    theta_dot = td_out
 
-# Check stability (numerical derivative)
 eps = 0.001
-rho_prime = (compute_poincare_map(theta_dot + eps) -
-             compute_poincare_map(theta_dot - eps)) / (2 * eps)
-
-print(f"Poincare map derivative: |rho'| = {abs(rho_prime):.4f}")
+rho_prime = (
+    compute_poincare_map(theta_dot + eps)
+    - compute_poincare_map(theta_dot - eps)
+) / (2 * eps)
+print(f"Poincare map derivative: |rho'| = "
+      f"{abs(rho_prime):.4f}")
 if abs(rho_prime) < 1:
     print("Gait is LOCALLY STABLE")
 else:
     print("Gait is UNSTABLE")
+
+# --- Plot return map, fixed point, and cobweb ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def plot_poincare_cobweb(fp, rho_d):
+    """Plot return map P(x), y=x, and cobweb."""
+    xr = np.linspace(0.5, 3.0, 200)
+    pv = [compute_poincare_map(x) for x in xr]
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.plot(xr, pv, "b-", linewidth=2,
+            label="Return map P(x)")
+    ax.plot(xr, xr, "k--", linewidth=1,
+            label="y = x (identity)")
+    ax.plot(fp, fp, "ro", markersize=12, zorder=5,
+            label=f"Fixed point = {fp:.3f}")
+    xc = 1.5
+    cx, cy = [xc], [0]
+    for _ in range(12):
+        yn = compute_poincare_map(xc)
+        cx.extend([xc, yn])
+        cy.extend([yn, yn])
+        xc = yn
+    ax.plot(cx, cy, "m-", linewidth=0.8,
+            alpha=0.7, label="Cobweb iteration")
+    ax.set_xlabel("theta_dot_n (rad/s)")
+    ax.set_ylabel("theta_dot_n+1 (rad/s)")
+    ax.set_title("Poincare Return Map  |rho'| = "
+                 + f"{abs(rho_d):.4f}")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    ax.set_aspect("equal")
+    fig.tight_layout()
+    return fig
+
+if fixed_point is not None:
+    fig = plot_poincare_cobweb(fixed_point, rho_prime)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100,
+                bbox_inches="tight")
+    buf.seek(0)
+    img = base64.b64encode(buf.read()).decode("utf-8")
+    print(f"data:image/png;base64,{img}")
+    plt.close()
+`}
+/>
+
+## Simulation: Zero Dynamics Phase Portrait
+
+The zero dynamics describe the 1-DOF system that remains after virtual
+constraints are enforced. Its phase portrait reveals the structure of
+the walking gait: stable limit cycles appear as closed orbits that
+attract neighboring trajectories.
+
+<CodeEditor
+  initialCode={`import math
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+g = 9.81
+l = 0.8
+m_h = 5.0
+m_l = 1.0
+slope = 0.05
+
+def compute_zd_accel(theta, dtheta):
+    """Compute acceleration on zero dynamics surface."""
+    grav = (m_h+m_l)*g*math.sin(theta-slope)/l
+    damp = 0.05 * dtheta
+    return (-grav - damp) / (m_h + m_l)
+
+def simulate_zd(th0, dth0, dt=0.001, n_max=5000):
+    """Integrate zero dynamics from initial condition."""
+    ths, dths = [th0], [dth0]
+    th, dth = th0, dth0
+    for _ in range(n_max):
+        ddth = compute_zd_accel(th, dth)
+        dth += ddth * dt
+        th += dth * dt
+        ths.append(th)
+        dths.append(dth)
+        if th >= 0.2 or dth < 0:
+            break
+    return ths, dths
+
+def apply_impact(dtheta, step_length=0.3):
+    """Apply impact map and leg relabeling."""
+    ha = math.asin(step_length / (2 * l))
+    return -0.2, dtheta * abs(math.cos(2 * ha))
+
+ics = [
+    (-0.2, 0.8, "tab:blue"),
+    (-0.2, 1.2, "tab:orange"),
+    (-0.2, 1.6, "tab:green"),
+    (-0.2, 2.0, "tab:red"),
+    (-0.2, 0.5, "tab:purple"),
+]
+
+fig, ax = plt.subplots(figsize=(7, 6))
+for th0, dth0, color in ics:
+    a_th, a_dth = [], []
+    t_ic, d_ic = th0, dth0
+    for _ in range(8):
+        tl, dl = simulate_zd(t_ic, d_ic)
+        a_th.extend(tl)
+        a_dth.extend(dl)
+        if dl[-1] <= 0:
+            break
+        t_ic, d_ic = apply_impact(dl[-1])
+    ax.plot(a_th, a_dth, color=color,
+            linewidth=1.2, alpha=0.8,
+            label=f"dtheta0 = {dth0:.1f}")
+    ax.plot(a_th[0], a_dth[0], "o",
+            color=color, markersize=6)
+
+ax.set_xlabel("theta (rad)")
+ax.set_ylabel("dtheta/dt (rad/s)")
+ax.set_title("Zero Dynamics Phase Portrait")
+ax.legend(fontsize=8, loc="upper left")
+ax.grid(True, alpha=0.3)
+ax.axvline(x=0.2, color="gray", linestyle=":",
+           linewidth=1)
+fig.tight_layout()
+buf = io.BytesIO()
+fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img}")
+plt.close()
+
+print()
+print("=== Zero Dynamics Phase Portrait ===")
+print("Each trajectory starts from theta = -0.2 rad")
+print("with different initial angular velocities.")
+print()
+print("Trajectories that are too slow stall before")
+print("reaching the impact surface (theta = 0.2).")
+print("Trajectories near the stable gait converge")
+print("to a limit cycle across multiple steps.")
 `}
 />
 
