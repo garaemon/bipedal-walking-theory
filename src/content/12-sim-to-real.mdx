@@ -121,6 +121,95 @@ for i in range(5):
 
 print()
 print("A robust policy must handle all these variations!")
+
+# --- Visualization of domain randomization ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def plot_domain_randomization(num_envs=50, seed=42):
+    """Plot parameter distributions and walking trajectories."""
+    rng = np.random.RandomState(seed)
+
+    # Sample randomized parameters
+    nominal_mass = 30.0
+    nominal_height = 0.8
+    nominal_friction = 0.8
+    masses = nominal_mass * rng.uniform(0.7, 1.3, num_envs)
+    heights = nominal_height * rng.uniform(0.85, 1.15, num_envs)
+    frictions = nominal_friction * rng.uniform(0.5, 1.5, num_envs)
+
+    fig, axes = plt.subplots(2, 1, figsize=(8, 7))
+
+    # Top: histograms of randomized parameters
+    ax = axes[0]
+    ax2 = ax.twinx()
+    bins = 12
+    ax.hist(masses, bins=bins, alpha=0.6, color="#2563eb",
+            label="Mass (kg)")
+    ax2.hist(frictions, bins=bins, alpha=0.6, color="#dc2626",
+             label="Friction")
+    ax.set_xlabel("Parameter Value")
+    ax.set_ylabel("Count (Mass)", color="#2563eb")
+    ax2.set_ylabel("Count (Friction)", color="#dc2626")
+    ax.set_title("Randomized Parameter Distributions")
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2,
+              loc="upper right")
+    ax.grid(axis="y", alpha=0.3)
+
+    # Bottom: walking trajectories under different envs
+    ax3 = axes[1]
+    sim_dt = 0.01
+    sim_time = 0.8
+    time_steps = int(sim_time / sim_dt)
+    t_arr = np.linspace(0, sim_time, time_steps)
+
+    for idx in range(num_envs):
+        omega = np.sqrt(9.81 / heights[idx])
+        pos = -0.05
+        vel = 0.3
+        traj = []
+        for _ in range(time_steps):
+            acc = omega**2 * pos
+            vel += acc * sim_dt
+            pos += vel * sim_dt
+            traj.append(pos)
+        ax3.plot(t_arr, traj, alpha=0.15, color="#2563eb",
+                 linewidth=0.8)
+
+    # Nominal trajectory for reference
+    omega_nom = np.sqrt(9.81 / nominal_height)
+    pos = -0.05
+    vel = 0.3
+    traj_nom = []
+    for _ in range(time_steps):
+        acc = omega_nom**2 * pos
+        vel += acc * sim_dt
+        pos += vel * sim_dt
+        traj_nom.append(pos)
+    ax3.plot(t_arr, traj_nom, color="#dc2626", linewidth=2.5,
+             label="Nominal")
+    ax3.set_xlabel("Time (s)")
+    ax3.set_ylabel("CoM Position x (m)")
+    ax3.set_title(
+        "Walking Trajectories Across Randomized Environments")
+    ax3.legend()
+    ax3.grid(alpha=0.3)
+
+    plt.tight_layout()
+    return fig
+
+fig = plot_domain_randomization()
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img_data = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img_data}")
+plt.close()
 `}
 />
 
@@ -170,6 +259,129 @@ Domain randomization requires careful tuning. Two main failure modes exist:
    (link masses, geometry).
 3. **Iterate based on transfer results**: Deploy to the real robot, observe
    failures, and widen the relevant randomization ranges.
+
+## Simulation: Randomization Range Analysis
+
+The following simulation demonstrates the trade-off between narrow and wide
+randomization. We sample environments with three different ranges (narrow,
+medium, wide) and compare the walking outcomes.
+
+<CodeEditor
+  initialCode={`import math
+import random
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+random.seed(42)
+rng = np.random.RandomState(42)
+
+def simulate_walking(omega, x0=-0.05, v0=0.3, dt=0.01,
+                     duration=0.5):
+    """Simulate LIPM walking and return final position."""
+    x = x0
+    v = v0
+    for _ in range(int(duration / dt)):
+        a = omega**2 * x
+        v += a * dt
+        x += v * dt
+    return x
+
+def sample_and_simulate(height_range, num_envs=80):
+    """Sample environments and simulate walking."""
+    nominal_height = 0.8
+    lo = nominal_height * (1.0 - height_range)
+    hi = nominal_height * (1.0 + height_range)
+    heights = rng.uniform(lo, hi, num_envs)
+    omegas = np.sqrt(9.81 / heights)
+    finals = [simulate_walking(w) for w in omegas]
+    return finals
+
+# Three randomization ranges
+ranges = {
+    "Narrow (5%)": 0.05,
+    "Medium (15%)": 0.15,
+    "Wide (30%)": 0.30,
+}
+
+results = {}
+print("=== Randomization Range Analysis ===")
+print()
+
+for label, r in ranges.items():
+    finals = sample_and_simulate(r)
+    results[label] = finals
+    mean_val = np.mean(finals)
+    std_val = np.std(finals)
+    print(f"{label}:")
+    print(f"  Final x mean={mean_val:.4f}m, std={std_val:.4f}m")
+    print(f"  Range: [{min(finals):.4f}, {max(finals):.4f}]")
+    print()
+
+print("Wider randomization -> more variation in outcomes")
+print("But policies trained on wider ranges are more robust")
+print("to real-world parameter uncertainty.")
+
+# --- Box plot comparison ---
+def plot_range_analysis(plot_results):
+    """Plot box plots comparing randomization ranges."""
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    labels = list(plot_results.keys())
+    data = [plot_results[k] for k in labels]
+    colors = ["#2563eb", "#16a34a", "#dc2626"]
+
+    bp = ax.boxplot(
+        data, labels=labels, patch_artist=True,
+        widths=0.5, showfliers=True,
+        flierprops=dict(marker="o", markersize=3, alpha=0.5))
+
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.4)
+    for median in bp["medians"]:
+        median.set_color("black")
+        median.set_linewidth(2)
+
+    # Overlay individual points
+    for i, (d, color) in enumerate(zip(data, colors)):
+        x_jitter = rng.normal(0, 0.04, len(d)) + (i + 1)
+        ax.scatter(x_jitter, d, alpha=0.3, s=10, color=color,
+                   zorder=3)
+
+    ax.set_ylabel("Final CoM Position x (m)")
+    ax.set_title(
+        "Effect of Randomization Range on Walking Outcomes")
+    ax.grid(axis="y", alpha=0.3)
+
+    # Annotate trade-off
+    ax.annotate(
+        "Less variation\\nbut may overfit",
+        xy=(1, np.median(data[0])),
+        xytext=(0.6, np.max(data[2]) * 0.95),
+        fontsize=8, ha="center",
+        arrowprops=dict(arrowstyle="->", color="gray"))
+    ax.annotate(
+        "More robust\\nbut conservative",
+        xy=(3, np.median(data[2])),
+        xytext=(3.4, np.min(data[0]) * 1.05),
+        fontsize=8, ha="center",
+        arrowprops=dict(arrowstyle="->", color="gray"))
+
+    plt.tight_layout()
+    return fig
+
+fig = plot_range_analysis(results)
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img_data = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img_data}")
+plt.close()
+`}
+/>
 
 ## System Identification
 
@@ -324,6 +536,82 @@ print("With adaptation, the policy adjusts its behavior:")
 print("  - Heavier mass -> stronger push-off")
 print("  - Lower friction -> shorter steps")
 print("  - Weaker motors -> conservative gait")
+
+# --- RMA adaptation convergence plot ---
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+
+def plot_rma_convergence():
+    """Plot parameter estimation convergence and error."""
+    conv_rng = np.random.RandomState(42)
+    num_steps = 200
+
+    # True parameters
+    true_mass = 1.2
+    true_friction = 0.6
+
+    # Simulated adaptation: exponential convergence with noise
+    time_arr = np.arange(num_steps)
+    tau_mass = 30.0
+    tau_friction = 40.0
+    noise_scale = 0.03
+
+    est_mass = (
+        true_mass
+        + (1.0 - true_mass) * np.exp(-time_arr / tau_mass)
+        + conv_rng.normal(0, noise_scale, num_steps)
+        * np.exp(-time_arr / (tau_mass * 2)))
+    est_friction = (
+        true_friction
+        + (0.8 - true_friction)
+        * np.exp(-time_arr / tau_friction)
+        + conv_rng.normal(0, noise_scale, num_steps)
+        * np.exp(-time_arr / (tau_friction * 2)))
+
+    fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+
+    # Top: true vs estimated values
+    ax = axes[0]
+    ax.plot(time_arr, est_mass, color="#2563eb", alpha=0.8,
+            linewidth=1.2, label="Estimated mass ratio")
+    ax.axhline(y=true_mass, color="#2563eb", linestyle="--",
+               linewidth=1.5, label="True mass ratio (1.2)")
+    ax.plot(time_arr, est_friction, color="#dc2626", alpha=0.8,
+            linewidth=1.2, label="Estimated friction")
+    ax.axhline(y=true_friction, color="#dc2626", linestyle="--",
+               linewidth=1.5, label="True friction (0.6)")
+    ax.set_ylabel("Parameter Value")
+    ax.set_title("RMA: Parameter Estimation Convergence")
+    ax.legend(loc="center right", fontsize=8)
+    ax.grid(alpha=0.3)
+
+    # Bottom: estimation error
+    ax2 = axes[1]
+    err_mass = np.abs(est_mass - true_mass)
+    err_friction = np.abs(est_friction - true_friction)
+    ax2.plot(time_arr, err_mass, color="#2563eb", alpha=0.8,
+             linewidth=1.2, label="Mass ratio error")
+    ax2.plot(time_arr, err_friction, color="#dc2626", alpha=0.8,
+             linewidth=1.2, label="Friction error")
+    ax2.set_xlabel("Time Step")
+    ax2.set_ylabel("Absolute Error")
+    ax2.set_title("Estimation Error Over Time")
+    ax2.legend(fontsize=8)
+    ax2.grid(alpha=0.3)
+
+    plt.tight_layout()
+    return fig
+
+fig = plot_rma_convergence()
+buf = io.BytesIO()
+plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+buf.seek(0)
+img_data = base64.b64encode(buf.read()).decode("utf-8")
+print(f"data:image/png;base64,{img_data}")
+plt.close()
 `}
 />
 
